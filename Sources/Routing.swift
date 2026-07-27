@@ -209,7 +209,11 @@ enum RouteConfigManager {
             guard inTopLevel, let key = trimmed.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces) else {
                 return false
             }
-            return key == "model_provider" || key == "model" || key == "openai_base_url"
+            return key == "model_provider"
+                || key == "model"
+                || key == "openai_base_url"
+                || key == "forced_login_method"
+                || key == "cli_auth_credentials_store"
         }
 
         while lines.first?.isEmpty == true { lines.removeFirst() }
@@ -224,6 +228,8 @@ enum RouteConfigManager {
             lines.insert("model_provider = \"openai\"", at: 0)
             lines.insert("model = \"\(tomlEscape(profile.model))\"", at: 1)
             lines.insert("openai_base_url = \"\(tomlEscape(activeBaseURL(for: profile)))\"", at: 2)
+            lines.insert("forced_login_method = \"api\"", at: 3)
+            lines.insert("cli_auth_credentials_store = \"file\"", at: 4)
         }
         cleaned = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
 
