@@ -20,7 +20,7 @@ struct CodexPulseWidgetData: Codable {
         modelName: "Codex",
         primaryValue: "—",
         primaryLabel: "正在读取用量",
-        detail: "打开 Codex Pulse 以刷新数据",
+        detail: "打开 Agent Pulse 以刷新数据",
         inputTokens: nil,
         outputTokens: nil,
         totalTokens: nil,
@@ -31,7 +31,7 @@ struct CodexPulseWidgetData: Codable {
 
 enum CodexPulseWidgetStore {
     static let kind = "CodexPulseUsageWidget"
-    static let dataDirectoryName = "Codex Pulse"
+    static let dataDirectoryName = "Agent Pulse"
     static let dataFileName = "widget-data.json"
 
     private static var dataURL: URL {
@@ -42,12 +42,13 @@ enum CodexPulseWidgetStore {
     }
 
     static func update(
+        agent: AgentKind,
         route: RouteChoice,
         codeUsage: UsageResponse?,
         officialUsage: OfficialUsageSnapshot?,
         task: TaskActivitySnapshot
     ) {
-        let routeName = route.displayName
+        var routeName = "Codex · \(route.displayName)"
         var modelName = "Codex"
         var primaryValue = "—"
         var primaryLabel = "正在读取用量"
@@ -56,39 +57,47 @@ enum CodexPulseWidgetStore {
         var outputTokens: Int?
         var totalTokens: Int?
 
-        switch route {
-        case let .provider(id):
-            let provider = ProviderStore.provider(id: id)
-            modelName = provider?.model ?? "第三方模型"
-            if provider?.isCodeAPI == true, let codeUsage {
-                primaryValue = String(format: "$%.2f", codeUsage.balance)
-                primaryLabel = "账户余额"
-                detail = "今日费用 $\(String(format: "%.2f", codeUsage.usage.today.actualCost))"
-                inputTokens = codeUsage.usage.today.inputTokens
-                outputTokens = codeUsage.usage.today.outputTokens
-                totalTokens = codeUsage.usage.today.totalTokens
-            } else {
-                primaryValue = provider?.name ?? "第三方"
-                primaryLabel = "当前提供商"
-                detail = provider?.baseURL ?? "配置不可用"
-            }
-        case .official:
-            if let officialUsage, officialUsage.isLoggedIn {
-                modelName = officialUsage.planType ?? "ChatGPT"
-                if let window = officialUsage.primary {
-                    primaryValue = String(format: "%.0f%%", window.remainingPercent)
-                    primaryLabel = "官方用量剩余"
-                    detail = "\(window.label) · 自动刷新"
+        if agent == .cursor {
+            routeName = "Cursor"
+            modelName = "Cursor Agent"
+            primaryValue = "Cursor"
+            primaryLabel = "当前 Agent"
+            detail = "状态 Hooks · 自动同步"
+        } else {
+            switch route {
+            case let .provider(id):
+                let provider = ProviderStore.provider(id: id)
+                modelName = provider?.model ?? "第三方模型"
+                if provider?.isCodeAPI == true, let codeUsage {
+                    primaryValue = String(format: "$%.2f", codeUsage.balance)
+                    primaryLabel = "账户余额"
+                    detail = "今日费用 $\(String(format: "%.2f", codeUsage.usage.today.actualCost))"
+                    inputTokens = codeUsage.usage.today.inputTokens
+                    outputTokens = codeUsage.usage.today.outputTokens
+                    totalTokens = codeUsage.usage.today.totalTokens
                 } else {
-                    primaryValue = "—"
-                    primaryLabel = "官方用量剩余"
-                    detail = officialUsage.email ?? "用量数据暂不可用"
+                    primaryValue = provider?.name ?? "第三方"
+                    primaryLabel = "当前提供商"
+                    detail = provider?.baseURL ?? "配置不可用"
                 }
-                totalTokens = officialUsage.tokenUsage?.todayTokens
-            } else if officialUsage != nil {
-                primaryValue = "未登录"
-                primaryLabel = "OpenAI 官方账号"
-                detail = "请在 Codex 中完成登录"
+            case .official:
+                if let officialUsage, officialUsage.isLoggedIn {
+                    modelName = officialUsage.planType ?? "ChatGPT"
+                    if let window = officialUsage.primary {
+                        primaryValue = String(format: "%.0f%%", window.remainingPercent)
+                        primaryLabel = "官方用量剩余"
+                        detail = "\(window.label) · 自动刷新"
+                    } else {
+                        primaryValue = "—"
+                        primaryLabel = "官方用量剩余"
+                        detail = officialUsage.email ?? "用量数据暂不可用"
+                    }
+                    totalTokens = officialUsage.tokenUsage?.todayTokens
+                } else if officialUsage != nil {
+                    primaryValue = "未登录"
+                    primaryLabel = "OpenAI 官方账号"
+                    detail = "请在 Codex 中完成登录"
+                }
             }
         }
 

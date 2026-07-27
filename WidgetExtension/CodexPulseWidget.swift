@@ -3,7 +3,7 @@ import WidgetKit
 import Darwin
 
 let widgetKind = "CodexPulseUsageWidget"
-let widgetDataRelativePath = "Library/Application Support/Codex Pulse/widget-data.json"
+let widgetDataRelativePath = "Library/Application Support/Agent Pulse/widget-data.json"
 
 struct WidgetData: Codable {
     let updatedAt: Date
@@ -80,7 +80,7 @@ struct PulseWidgetView: View {
             HStack(spacing: 7) {
                 Image(systemName: "terminal")
                     .font(.system(size: 11, weight: .semibold))
-                Text("CODEX PULSE")
+                Text("AGENT PULSE")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .tracking(0.7)
                 Spacer(minLength: 0)
@@ -153,8 +153,8 @@ struct CodexPulseUsageWidget: Widget {
         StaticConfiguration(kind: kind, provider: PulseProvider()) { entry in
             PulseWidgetView(entry: entry)
         }
-        .configurationDisplayName("Codex Pulse")
-        .description("在桌面查看当前路由、用量、Token 与 Codex 任务状态。")
+        .configurationDisplayName("Agent Pulse")
+        .description("在桌面查看当前 Agent、路由、用量、Token 与任务状态。")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

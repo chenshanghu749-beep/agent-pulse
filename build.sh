@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="${0:A:h}"
 BUILD_DIR="$ROOT_DIR/build"
-APP_DIR="$BUILD_DIR/Codex Pulse.app"
+APP_DIR="$BUILD_DIR/Agent Pulse.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"

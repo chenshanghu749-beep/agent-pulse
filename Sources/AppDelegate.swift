@@ -12,9 +12,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var iconAnimationTimer: Timer?
     private var startupChaseTimer: Timer?
     private var startupChaseIndex: Int?
+    private var agent = AgentPreference.selected
     private var route = RouteConfigManager.currentRoute()
     private var latestCodeUsage: UsageResponse?
     private var latestOfficialUsage: OfficialUsageSnapshot?
+    private var latestCursorStatus = CursorStatus.unavailable
     private var latestError: String?
     private var lastUpdated: Date?
     private var isRefreshingUsage = false
@@ -44,9 +46,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             latestError = error.localizedDescription
         }
         route = RouteConfigManager.currentRoute()
+        if agent == .cursor {
+            do {
+                try CursorIntegration.installHooks()
+            } catch {
+                latestError = error.localizedDescription
+            }
+        }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.autosaveName = "CodexPulseStatusItem"
+        statusItem.autosaveName = "AgentPulseStatusItem"
         mainMenu.delegate = self
         configureStatusButton()
         startStartupChase()
@@ -126,6 +135,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { await refreshUsage() }
     }
 
+    func agentDidChange(to agent: AgentKind) {
+        self.agent = agent
+        AgentPreference.selected = agent
+        latestError = nil
+        latestCodeUsage = nil
+        latestOfficialUsage = nil
+        taskSnapshot = TaskActivitySnapshot(state: .ready, changedAt: nil)
+        startStartupChase()
+        updateStatusTitle()
+        rebuildMainMenu()
+        updateWidget()
+        Task {
+            await refreshTaskActivity()
+            await refreshUsage()
+        }
+    }
+
     func statusIconStyleDidChange(to style: StatusIconStyle) {
         statusIconStyle = style
         StatusIconPreference.selected = style
@@ -137,8 +163,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "路由已切换，Codex 未能自动打开"
-        alert.informativeText = "配置已经生效。你可以稍后手动打开 Codex。\n\n\(message)"
+        alert.messageText = "\(agent.displayName) 未能自动打开"
+        alert.informativeText = "配置已经生效。你可以稍后手动打开 \(agent.displayName)。\n\n\(message)"
         alert.addButton(withTitle: "知道了")
         alert.runModal()
     }
@@ -190,6 +216,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateStatusTitle() {
         guard let button = statusItem?.button else { return }
+        if agent == .cursor {
+            button.title = "Cursor"
+            button.toolTip = "Agent Pulse · Cursor"
+            return
+        }
         let title: String
         switch route {
         case let .provider(id):
@@ -210,8 +241,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 title = "官方 …"
             }
         }
-        button.title = title
-        button.toolTip = "Codex Pulse · \(route.displayName)"
+        button.title = "Codex · \(title)"
+        button.toolTip = "Agent Pulse · Codex · \(route.displayName)"
     }
 
     private func compact(_ value: String) -> String {
@@ -250,7 +281,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             button.image = StatusIconRenderer.blended(from: oldImage, to: newImage, progress: CGFloat(progress))
         }
-        button.toolTip = "Codex Pulse · \(taskStatusText()) · \(route.displayName)"
+        let routeText = agent == .codex ? " · \(route.displayName)" : ""
+        button.toolTip = "Agent Pulse · \(agent.displayName) · \(taskStatusText())\(routeText)"
     }
 
     private func taskStatusText() -> String {
@@ -267,7 +299,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshUsage() async {
         guard !isRefreshingUsage else { return }
         isRefreshingUsage = true
-        route = RouteConfigManager.currentRoute()
+        if agent == .codex {
+            route = RouteConfigManager.currentRoute()
+        }
         rebuildMainMenu()
         defer {
             isRefreshingUsage = false
@@ -276,6 +310,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         do {
+            if agent == .cursor {
+                let appInstalled = CursorLauncher.applicationURL() != nil
+                latestCursorStatus = await Task.detached(priority: .utility) {
+                    CursorIntegration.readCLIStatus(appInstalled: appInstalled)
+                }.value
+                latestError = latestCursorStatus.isInstalled ? nil : latestCursorStatus.detail
+                lastUpdated = Date()
+                updateStatusTitle()
+                return
+            }
             switch route {
             case let .provider(id):
                 guard let provider = ProviderStore.provider(id: id) else {
@@ -302,16 +346,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func rebuildMainMenu() {
         mainMenu.removeAllItems()
-        mainMenu.addItem(info("Codex Pulse", emphasis: true))
-        mainMenu.addItem(info("\(taskStatusText())  ·  \(route.displayName)"))
+        mainMenu.addItem(info("Agent Pulse", emphasis: true))
+        let routeText = agent == .codex ? "  ·  \(route.displayName)" : ""
+        mainMenu.addItem(info("\(agent.displayName)  ·  \(taskStatusText())\(routeText)"))
         mainMenu.addItem(.separator())
 
-        switch route {
-        case let .provider(id):
-            if ProviderStore.provider(id: id)?.isCodeAPI == true { addCodeUsageMenu(to: mainMenu) }
-            else { addProviderMenu(id: id, to: mainMenu) }
-        case .official:
-            addOfficialUsageMenu(to: mainMenu)
+        if agent == .cursor {
+            addCursorMenu(to: mainMenu)
+        } else {
+            switch route {
+            case let .provider(id):
+                if ProviderStore.provider(id: id)?.isCodeAPI == true { addCodeUsageMenu(to: mainMenu) }
+                else { addProviderMenu(id: id, to: mainMenu) }
+            case .official:
+                addOfficialUsageMenu(to: mainMenu)
+            }
         }
 
         if let error = latestError {
@@ -336,18 +385,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         mainMenu.addItem(widgetItem)
 
         let dashboardTitle: String
-        switch route {
-        case .official: dashboardTitle = "打开官方用量页面"
-        case let .provider(id): dashboardTitle = ProviderStore.provider(id: id)?.isCodeAPI == true ? "打开 CodeAPI 控制台" : "打开提供商地址"
+        if agent == .cursor {
+            dashboardTitle = "打开 Cursor 模型设置"
+        } else {
+            switch route {
+            case .official: dashboardTitle = "打开官方用量页面"
+            case let .provider(id): dashboardTitle = ProviderStore.provider(id: id)?.isCodeAPI == true ? "打开 CodeAPI 控制台" : "打开提供商地址"
+            }
         }
         let dashboard = NSMenuItem(title: dashboardTitle, action: #selector(openUsageDashboard), keyEquivalent: "")
         dashboard.target = self
         mainMenu.addItem(dashboard)
         mainMenu.addItem(.separator())
-        let open = NSMenuItem(title: "打开 Codex", action: #selector(openCodex), keyEquivalent: "")
+        let open = NSMenuItem(title: "打开 \(agent.displayName)", action: #selector(openSelectedAgent), keyEquivalent: "")
         open.target = self
         mainMenu.addItem(open)
-        let quit = NSMenuItem(title: "退出 Codex Pulse", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "退出 Agent Pulse", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         mainMenu.addItem(quit)
     }
@@ -362,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refresh.target = self
         contextMenu.addItem(refresh)
         contextMenu.addItem(.separator())
-        let settingsItem = NSMenuItem(title: "Codex Pulse 设置…", action: #selector(openSettings), keyEquivalent: "")
+        let settingsItem = NSMenuItem(title: "Agent Pulse 设置…", action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
         contextMenu.addItem(settingsItem)
     }
@@ -428,10 +481,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let credits = data.resetCredits { menu.addItem(info("可用重置次数  \(credits)")) }
     }
 
+    private func addCursorMenu(to menu: NSMenu) {
+        menu.addItem(info("Cursor", emphasis: true))
+        guard latestCursorStatus.isInstalled else {
+            menu.addItem(info("未找到 Cursor.app"))
+            return
+        }
+        let authText: String
+        switch latestCursorStatus.isAuthenticated {
+        case .some(true): authText = "已登录"
+        case .some(false): authText = "未登录"
+        case .none: authText = latestCursorStatus.cliAvailable ? "登录状态未知" : "未安装 cursor-agent CLI"
+        }
+        menu.addItem(info("账号  \(authText)"))
+        menu.addItem(info("状态 Hooks  \(CursorIntegration.hooksInstalled() ? "已启用" : "未启用")"))
+        if !latestCursorStatus.detail.isEmpty {
+            menu.addItem(info(latestCursorStatus.detail))
+        }
+    }
+
     private func refreshTaskActivity() async {
         guard !isRefreshingTask else { return }
         isRefreshingTask = true
-        let snapshot = await Task.detached(priority: .utility) { TaskActivityReader.read() }.value
+        let selectedAgent = agent
+        let snapshot = await Task.detached(priority: .utility) {
+            selectedAgent == .cursor ? CursorActivityReader.read() : TaskActivityReader.read()
+        }.value
         let shouldPlayCompletionChase: Bool
         switch (taskSnapshot.state, snapshot.state) {
         case (.running, .ready), (.waiting, .ready): shouldPlayCompletionChase = true
@@ -472,6 +547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateWidget() {
         CodexPulseWidgetStore.update(
+            agent: agent,
             route: route,
             codeUsage: latestCodeUsage,
             officialUsage: latestOfficialUsage,
@@ -493,13 +569,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openWidgetGuide() {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "添加 Codex Pulse 桌面组件"
-        alert.informativeText = "在 macOS 桌面空白处点按右键，选择“编辑小组件”，搜索 Codex Pulse，然后把小号或中号组件拖到桌面。\n\n组件会展示当前路由、官方剩余用量或 CodeAPI 余额、Token 和任务状态。需要 macOS 14 或更高版本。"
+        alert.messageText = "添加 Agent Pulse 桌面组件"
+        alert.informativeText = "在 macOS 桌面空白处点按右键，选择“编辑小组件”，搜索 Agent Pulse，然后把小号或中号组件拖到桌面。\n\n组件会展示当前 Agent、路由、用量和任务状态。需要 macOS 14 或更高版本。"
         alert.addButton(withTitle: "知道了")
         alert.runModal()
     }
 
     @objc private func openUsageDashboard() {
+        if agent == .cursor {
+            Task {
+                do {
+                    try await CursorLauncher.openModelSettings()
+                } catch {
+                    presentLaunchWarning(error.localizedDescription)
+                }
+            }
+            return
+        }
         switch route {
         case .official:
             NSWorkspace.shared.open(URL(string: "https://chatgpt.com/codex/settings/usage")!)
@@ -510,11 +596,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func openCodex() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: CodexLauncher.bundleIdentifier) else { return }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+    @objc private func openSelectedAgent() {
+        if agent == .cursor {
+            Task {
+                do {
+                    try await CursorLauncher.launch()
+                } catch {
+                    presentLaunchWarning(error.localizedDescription)
+                }
+            }
+        } else {
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: CodexLauncher.bundleIdentifier) else { return }
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+        }
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }

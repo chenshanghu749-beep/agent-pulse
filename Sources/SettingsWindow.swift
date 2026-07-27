@@ -79,6 +79,12 @@ final class SettingsWindowController: NSWindowController {
     private var sidebarButtons: [Section: NSButton] = [:]
     private let pageHost = NSView()
 
+    private let agentControl = NSSegmentedControl(
+        labels: AgentKind.allCases.map(\.displayName),
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
     private let routeControl = NSSegmentedControl(
         labels: ["OpenAI 官方", "第三方提供商"],
         trackingMode: .selectOne,
@@ -97,7 +103,8 @@ final class SettingsWindowController: NSWindowController {
     private let iconStylePopup = NSPopUpButton()
     private let themePopup = NSPopUpButton()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
-    private let confirmButton = NSButton(title: "应用并打开 Codex", target: nil, action: nil)
+    private let cursorModelsButton = NSButton(title: "打开模型设置", target: nil, action: nil)
+    private let confirmButton = NSButton(title: "应用并打开", target: nil, action: nil)
 
     init(appDelegate: AppDelegate) {
         self.appDelegate = appDelegate
@@ -107,7 +114,7 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Codex Pulse 设置"
+        window.title = "Agent Pulse 设置"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.backgroundColor = NSColor(name: nil) { appearance in
@@ -135,7 +142,7 @@ final class SettingsWindowController: NSWindowController {
         let appMark = NSImageView(image: NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: nil)!)
         appMark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
         appMark.contentTintColor = .labelColor
-        let appName = NSTextField(labelWithString: "Codex Pulse")
+        let appName = NSTextField(labelWithString: "Agent Pulse")
         appName.font = .systemFont(ofSize: 14, weight: .semibold)
         let appRow = NSStackView(views: [appMark, appName])
         appRow.orientation = .horizontal
@@ -228,6 +235,10 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private func configureControls() {
+        agentControl.target = self
+        agentControl.action = #selector(agentChanged)
+        agentControl.setWidth(142, forSegment: 0)
+        agentControl.setWidth(142, forSegment: 1)
         routeControl.target = self
         routeControl.action = #selector(routeChanged)
         routeControl.setWidth(142, forSegment: 0)
@@ -250,6 +261,8 @@ final class SettingsWindowController: NSWindowController {
         protocolPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 250).isActive = true
         testProviderButton.target = self
         testProviderButton.action = #selector(testProviderConnection)
+        cursorModelsButton.target = self
+        cursorModelsButton.action = #selector(openCursorModels)
 
         iconStylePopup.addItems(withTitles: StatusIconStyle.allCases.map(\.displayName))
         for (index, style) in StatusIconStyle.allCases.enumerated() {
@@ -267,6 +280,11 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private func buildRoutePage() -> NSView {
+        let agentRow = settingRow(
+            title: "Agent",
+            detail: "选择要监控和启动的本地开发 Agent。",
+            control: agentControl
+        )
         let routeRow = settingRow(
             title: "模型来源",
             detail: "选择 OpenAI 官方账号或自定义模型提供商。",
@@ -282,11 +300,18 @@ final class SettingsWindowController: NSWindowController {
             detail: "所有路由显示同一份历史；会话内容不会被复制、归档或删除。",
             control: NSTextField(labelWithString: "始终保留")
         )
+        let cursorRow = settingRow(
+            title: "Cursor BYOK",
+            detail: "API Key 与模型由 Cursor 官方 Models 设置管理，Agent Pulse 不读取或改写 Cursor 会话数据库。",
+            control: cursorModelsButton
+        )
         return page(
             title: "路由",
-            subtitle: "选择 Codex 使用的模型来源。",
+            subtitle: "选择 Agent，以及它使用的模型来源。",
             cards: [
-                card([routeRow, separator(), providerRow, separator(), historyRow])
+                card([agentRow]),
+                card([routeRow, separator(), providerRow, separator(), historyRow]),
+                card([cursorRow])
             ]
         )
     }
@@ -349,7 +374,7 @@ final class SettingsWindowController: NSWindowController {
         preview.isSelectable = true
         return page(
             title: "状态与外观",
-            subtitle: "自定义 Codex Pulse 的显示方式。",
+            subtitle: "自定义 Agent Pulse 的显示方式。",
             cards: [card([themeRow, separator(), iconRow]), card([padded(preview, vertical: 13)])]
         )
     }
@@ -501,6 +526,7 @@ final class SettingsWindowController: NSWindowController {
 
     func present() {
         providers = ProviderStore.providers()
+        agentControl.selectedSegment = AgentKind.allCases.firstIndex(of: AgentPreference.selected) ?? 0
         let route = RouteConfigManager.currentRoute()
         routeControl.selectedSegment = route == .official ? 0 : 1
         if case let .provider(id) = route {
@@ -512,7 +538,7 @@ final class SettingsWindowController: NSWindowController {
         loadSelectedProvider()
         statusLabel.stringValue = ""
         confirmButton.isEnabled = true
-        confirmButton.title = "应用并打开 Codex"
+        updateConfirmButtonTitle()
         if let index = StatusIconStyle.allCases.firstIndex(of: StatusIconPreference.selected) {
             iconStylePopup.selectItem(at: index)
         }
@@ -531,6 +557,12 @@ final class SettingsWindowController: NSWindowController {
     @objc private func routeChanged() {
         statusLabel.stringValue = ""
         updateRouteFields()
+    }
+
+    @objc private func agentChanged() {
+        statusLabel.stringValue = ""
+        updateRouteFields()
+        updateConfirmButtonTitle()
     }
 
     @objc private func routeProviderChanged() {
@@ -561,11 +593,28 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private func updateRouteFields() {
+        let selectedAgent = selectedAgent()
+        let isCodex = selectedAgent == .codex
         let custom = routeControl.selectedSegment == 1
-        routeProviderPopup.isEnabled = custom && !providers.isEmpty
-        routeDescription.stringValue = custom
-            ? "第三方路由使用当前选中的提供商。应用后 Codex 会重新启动，但本地会话不会删除。"
-            : "官方路由使用 Codex 当前的 ChatGPT 登录状态；无需重复配置 API Key。"
+        routeControl.isEnabled = isCodex
+        routeProviderPopup.isEnabled = isCodex && custom && !providers.isEmpty
+        cursorModelsButton.isEnabled = !isCodex
+        if isCodex {
+            routeDescription.stringValue = custom
+                ? "第三方路由使用当前选中的提供商。应用后 Codex 会重新启动，但本地会话不会删除。"
+                : "官方路由使用 Codex 当前的 ChatGPT 登录状态；无需重复配置 API Key。"
+        } else {
+            routeDescription.stringValue = "Cursor 的模型与 BYOK Key 由 Cursor 官方设置管理；Agent Pulse 负责启动和状态同步。"
+        }
+    }
+
+    private func selectedAgent() -> AgentKind {
+        let index = agentControl.selectedSegment
+        return AgentKind.allCases.indices.contains(index) ? AgentKind.allCases[index] : .codex
+    }
+
+    private func updateConfirmButtonTitle() {
+        confirmButton.title = "应用并打开 \(selectedAgent().displayName)"
     }
 
     private func reloadProviderPopups() {
@@ -754,7 +803,22 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func closeWindow() { window?.close() }
 
+    @objc private func openCursorModels() {
+        Task {
+            do {
+                try await CursorLauncher.openModelSettings()
+                showSuccess("已打开 Cursor Models 设置。")
+            } catch {
+                showError(error.localizedDescription)
+            }
+        }
+    }
+
     @objc private func confirmSelection() {
+        if selectedAgent() == .cursor {
+            confirmCursorSelection()
+            return
+        }
         confirmButton.isEnabled = false
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.stringValue = "正在更新路由…"
@@ -778,7 +842,7 @@ final class SettingsWindowController: NSWindowController {
             } catch {
                 showError(error.localizedDescription)
                 confirmButton.isEnabled = true
-                confirmButton.title = "应用并打开 Codex"
+                updateConfirmButtonTitle()
                 return
             }
 
@@ -788,7 +852,7 @@ final class SettingsWindowController: NSWindowController {
             } catch {
                 showError(error.localizedDescription)
                 confirmButton.isEnabled = true
-                confirmButton.title = "应用并打开 Codex"
+                updateConfirmButtonTitle()
                 return
             }
 
@@ -809,10 +873,12 @@ final class SettingsWindowController: NSWindowController {
                 }
                 showError(error.localizedDescription)
                 confirmButton.isEnabled = true
-                confirmButton.title = "应用并打开 Codex"
+                updateConfirmButtonTitle()
                 return
             }
 
+            AgentPreference.selected = .codex
+            appDelegate?.agentDidChange(to: .codex)
             appDelegate?.routeDidChange(to: route, validatedCodeUsage: usage)
             if authPreparation.requiresOfficialLogin {
                 showSuccess("已切换到官方路由，请在 Codex 中重新登录官方账号。")
@@ -829,6 +895,30 @@ final class SettingsWindowController: NSWindowController {
                 }
             } catch {
                 appDelegate?.presentLaunchWarning(error.localizedDescription)
+            }
+        }
+    }
+
+    private func confirmCursorSelection() {
+        confirmButton.isEnabled = false
+        confirmButton.title = "正在配置…"
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.stringValue = "正在安装 Cursor 状态 Hooks…"
+
+        Task {
+            do {
+                try CursorIntegration.installHooks()
+                AgentPreference.selected = .cursor
+                appDelegate?.agentDidChange(to: .cursor)
+                statusLabel.stringValue = "正在打开 Cursor…"
+                try await CursorLauncher.launch()
+                showSuccess("Cursor 已连接，状态 Hooks 已启用。")
+                confirmButton.title = "连接成功"
+                window?.close()
+            } catch {
+                showError(error.localizedDescription)
+                confirmButton.isEnabled = true
+                updateConfirmButtonTitle()
             }
         }
     }

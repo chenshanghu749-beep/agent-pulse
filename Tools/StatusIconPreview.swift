@@ -17,7 +17,7 @@ let image = NSImage(size: canvasSize, flipped: false) { rect in
     rect.fill()
 
     let title = NSAttributedString(
-        string: "Codex Pulse · 状态图标主题",
+        string: "Agent Pulse · 状态图标主题",
         attributes: [
             .font: NSFont.systemFont(ofSize: 24, weight: .semibold),
             .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1)

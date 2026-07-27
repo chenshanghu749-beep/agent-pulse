@@ -151,7 +151,7 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
             backing: .buffered,
             defer: false
         )
-        window.title = "Codex Pulse 设置"
+        window.title = "Agent Pulse 设置"
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
@@ -435,7 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(dashboard)
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "退出 Codex Pulse", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "退出 Agent Pulse", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
     }
@@ -595,6 +595,14 @@ if CommandLine.arguments.contains("--login-status-test") {
     }
     try! png.write(to: outputURL, options: .atomic)
     print("PINWHEEL_PREVIEW_OK \(outputURL.path)")
+} else if CommandLine.arguments.contains("--install-cursor-hooks") {
+    do {
+        try CursorIntegration.installHooks()
+        print("CURSOR_HOOKS_OK \(CursorIntegration.hooksURL.path)")
+    } catch {
+        print("CURSOR_HOOKS_ERROR \(error.localizedDescription)")
+        exit(EXIT_FAILURE)
+    }
 } else if CommandLine.arguments.contains("--self-test") {
     let sample = """
     model = "gpt-5.6-sol"
@@ -887,6 +895,52 @@ if CommandLine.arguments.contains("--login-status-test") {
     let abortedSession = taskRoot.appendingPathComponent("aborted.jsonl")
     try! Data((event("task_started") + event("turn_aborted")).utf8).write(to: abortedSession)
     precondition(TaskActivityReader.read(root: taskRoot).state == .ready)
+
+    let cursorTestRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("agent-pulse-cursor-test-\(UUID().uuidString)", isDirectory: true)
+    let cursorConfig = cursorTestRoot.appendingPathComponent(".cursor", isDirectory: true)
+    let cursorSupport = cursorTestRoot.appendingPathComponent("support", isDirectory: true)
+    try! FileManager.default.createDirectory(at: cursorConfig, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: cursorTestRoot) }
+    let existingHooks = """
+    {
+      "version": 1,
+      "hooks": {
+        "beforeShellCommand": [{"command": "/usr/bin/true"}]
+      }
+    }
+    """
+    try! Data(existingHooks.utf8).write(to: cursorConfig.appendingPathComponent("hooks.json"))
+    try! CursorIntegration.installHooks(
+        cursorDirectory: cursorConfig,
+        supportDirectory: cursorSupport
+    )
+    try! CursorIntegration.installHooks(
+        cursorDirectory: cursorConfig,
+        supportDirectory: cursorSupport
+    )
+    let installedHooksData = try! Data(contentsOf: cursorConfig.appendingPathComponent("hooks.json"))
+    let installedHooksRoot = try! JSONSerialization.jsonObject(with: installedHooksData) as! [String: Any]
+    let installedHooks = installedHooksRoot["hooks"] as! [String: Any]
+    let beforeShellHooks = installedHooks["beforeShellCommand"] as! [[String: String]]
+    precondition(beforeShellHooks.contains { $0["command"] == "/usr/bin/true" })
+    let pulseHookCount = installedHooks.values.reduce(0) { count, value in
+        let entries = value as? [[String: String]] ?? []
+        return count + entries.filter { $0["command"]?.contains("cursor-hook.sh") == true }.count
+    }
+    precondition(pulseHookCount == 7)
+
+    let cursorState = cursorTestRoot.appendingPathComponent("cursor-state.json")
+    let cursorTimestamp = Date().timeIntervalSince1970
+    try! Data("{\"state\":\"running\",\"timestamp\":\(cursorTimestamp)}".utf8)
+        .write(to: cursorState)
+    precondition(CursorActivityReader.read(stateURL: cursorState).state == .running(1))
+    try! Data("{\"state\":\"waiting\",\"timestamp\":\(cursorTimestamp)}".utf8)
+        .write(to: cursorState)
+    precondition(CursorActivityReader.read(stateURL: cursorState).state == .waiting(1))
+    try! Data("{\"state\":\"ready\",\"timestamp\":\(cursorTimestamp)}".utf8)
+        .write(to: cursorState)
+    precondition(CursorActivityReader.read(stateURL: cursorState).state == .ready)
     print("SELF_TEST_OK")
 } else {
     MainActor.assumeIsolated {
