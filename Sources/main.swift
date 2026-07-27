@@ -538,6 +538,29 @@ if CommandLine.arguments.contains("--login-status-test") {
         }
     }
     semaphore.wait()
+} else if CommandLine.arguments.contains("--model-catalog-test") {
+    do {
+        guard let providerID = ProviderStore.selectedProviderID(),
+              let profile = ProviderStore.provider(id: providerID) else {
+            print("MODEL_CATALOG_ERROR 未找到当前提供商。")
+            exit(EXIT_FAILURE)
+        }
+        if let url = try CodexModelCatalog.prepareIfNeeded(model: profile.model) {
+            let data = try Data(contentsOf: url)
+            let root = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let models = root["models"] as! [[String: Any]]
+            let selected = models.first {
+                ($0["slug"] as? String)?.caseInsensitiveCompare(profile.model) == .orderedSame
+            }
+            precondition(selected?["use_responses_lite"] as? Bool == false)
+            print("MODEL_CATALOG_OK \(profile.model) Responses Lite disabled")
+        } else {
+            print("MODEL_CATALOG_OK \(profile.model) override not required")
+        }
+    } catch {
+        print("MODEL_CATALOG_ERROR \(error.localizedDescription)")
+        exit(EXIT_FAILURE)
+    }
 } else if CommandLine.arguments.contains("--self-test") {
     let sample = """
     model = "gpt-5.6-sol"
@@ -620,10 +643,14 @@ if CommandLine.arguments.contains("--login-status-test") {
         route: .provider("codeapi"),
         profile: .codeAPI,
         profiles: [.codeAPI],
-        legacyProfile: .codeAPI
+        legacyProfile: .codeAPI,
+        compatibilityModelCatalogJSON: "/tmp/provider-model-catalog.json"
     )
     precondition(codeAPIConfig.hasPrefix("model_provider = \"openai\""))
     precondition(codeAPIConfig.contains("openai_base_url = \"https://codeapi.nexita.net/v1\""))
+    precondition(codeAPIConfig.contains(
+        "model_catalog_json = \"/tmp/provider-model-catalog.json\""
+    ))
     precondition(codeAPIConfig.contains("[model_providers.codeapi_status_custom]"))
     precondition(codeAPIConfig.contains("[model_providers.codeapi]"))
     precondition(codeAPIConfig.components(separatedBy: "[model_providers.codeapi]").count == 2)
@@ -648,7 +675,8 @@ if CommandLine.arguments.contains("--login-status-test") {
         route: .provider("codeapi"),
         profile: .codeAPI,
         profiles: [.codeAPI],
-        legacyProfile: .codeAPI
+        legacyProfile: .codeAPI,
+        compatibilityModelCatalogJSON: "/tmp/provider-model-catalog.json"
     )
     precondition(repairedCodeAPIConfig.components(separatedBy: "[model_providers.codeapi]").count == 2)
     precondition(repairedCodeAPIConfig.components(separatedBy: "[model_providers.codeapi.auth]").count == 2)
@@ -660,7 +688,8 @@ if CommandLine.arguments.contains("--login-status-test") {
         route: .provider("codeapi"),
         profile: .codeAPI,
         profiles: [.codeAPI],
-        legacyProfile: .codeAPI
+        legacyProfile: .codeAPI,
+        compatibilityModelCatalogJSON: "/tmp/provider-model-catalog.json"
     )
     precondition(rerenderedCodeAPIConfig == repairedCodeAPIConfig)
 
@@ -696,6 +725,31 @@ if CommandLine.arguments.contains("--login-status-test") {
         profiles: [provider],
         selectedProviderID: provider.id
     ) == .official)
+
+    let catalogFixture = try! JSONSerialization.data(withJSONObject: [
+        "models": [
+            [
+                "slug": "gpt-5.6-sol",
+                "use_responses_lite": true,
+                "multi_agent_version": "v2"
+            ],
+            [
+                "slug": "gpt-5.5",
+                "use_responses_lite": false
+            ]
+        ]
+    ])
+    let patchedCatalogData = try! CodexModelCatalog.patchedCatalog(
+        catalogFixture,
+        selectedModel: "gpt-5.6-sol"
+    )
+    let patchedCatalog = try! JSONSerialization.jsonObject(
+        with: patchedCatalogData
+    ) as! [String: Any]
+    let patchedModels = patchedCatalog["models"] as! [[String: Any]]
+    let patchedSol = patchedModels.first { $0["slug"] as? String == "gpt-5.6-sol" }!
+    precondition(patchedSol["use_responses_lite"] as? Bool == false)
+    precondition(patchedSol["multi_agent_version"] as? String == "v1")
 
     let providerKey = "provider-test-key"
     let providerAuth = try! JSONSerialization.data(withJSONObject: ["OPENAI_API_KEY": providerKey])

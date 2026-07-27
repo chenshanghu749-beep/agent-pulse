@@ -114,6 +114,9 @@ enum RouteConfigManager {
             )
             if existingProvider == nil || existingRoute == .official {
                 try ProviderStore.setOfficialModel(topLevelValue(named: "model", in: existing))
+                try ProviderStore.setOfficialModelCatalogJSON(
+                    topLevelValue(named: "model_catalog_json", in: existing)
+                )
             }
             let profile: ProviderProfile?
             switch route {
@@ -123,6 +126,9 @@ enum RouteConfigManager {
                 guard let selected = ProviderStore.provider(id: id) else { throw RouteConfigError.providerNotFound }
                 profile = selected
                 try ProviderStore.setSelectedProviderID(id)
+            }
+            let compatibilityCatalogURL = try profile.flatMap {
+                try CodexModelCatalog.prepareIfNeeded(model: $0.model)
             }
             if fileManager.fileExists(atPath: configURL.path) {
                 let backup = directory.appendingPathComponent("config.toml.codeapi-status.bak")
@@ -136,7 +142,9 @@ enum RouteConfigManager {
                 profile: profile,
                 profiles: profiles,
                 legacyProfile: legacyProfile,
-                officialModel: ProviderStore.officialModel()
+                officialModel: ProviderStore.officialModel(),
+                officialModelCatalogJSON: ProviderStore.officialModelCatalogJSON(),
+                compatibilityModelCatalogJSON: compatibilityCatalogURL?.path
             )
             try validate(rendered)
             try Data(rendered.utf8).write(to: configURL, options: .atomic)
@@ -177,7 +185,9 @@ enum RouteConfigManager {
         profile: ProviderProfile? = nil,
         profiles: [ProviderProfile] = [],
         legacyProfile: ProviderProfile? = nil,
-        officialModel: String? = nil
+        officialModel: String? = nil,
+        officialModelCatalogJSON: String? = nil,
+        compatibilityModelCatalogJSON: String? = nil
     ) -> String {
         let configuredProfiles = profiles.isEmpty ? profile.map { [$0] } ?? [] : profiles
         var providerEntries: [(id: String, profile: ProviderProfile)] = []
@@ -214,6 +224,7 @@ enum RouteConfigManager {
                 || key == "openai_base_url"
                 || key == "forced_login_method"
                 || key == "cli_auth_credentials_store"
+                || key == "model_catalog_json"
         }
 
         while lines.first?.isEmpty == true { lines.removeFirst() }
@@ -223,6 +234,12 @@ enum RouteConfigManager {
             if let officialModel, !officialModel.isEmpty {
                 lines.insert("model = \"\(tomlEscape(officialModel))\"", at: 1)
             }
+            if let officialModelCatalogJSON, !officialModelCatalogJSON.isEmpty {
+                lines.insert(
+                    "model_catalog_json = \"\(tomlEscape(officialModelCatalogJSON))\"",
+                    at: min(2, lines.count)
+                )
+            }
         case .provider:
             guard let profile else { return content }
             lines.insert("model_provider = \"openai\"", at: 0)
@@ -230,6 +247,12 @@ enum RouteConfigManager {
             lines.insert("openai_base_url = \"\(tomlEscape(activeBaseURL(for: profile)))\"", at: 2)
             lines.insert("forced_login_method = \"api\"", at: 3)
             lines.insert("cli_auth_credentials_store = \"file\"", at: 4)
+            if let compatibilityModelCatalogJSON, !compatibilityModelCatalogJSON.isEmpty {
+                lines.insert(
+                    "model_catalog_json = \"\(tomlEscape(compatibilityModelCatalogJSON))\"",
+                    at: 5
+                )
+            }
         }
         cleaned = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
 

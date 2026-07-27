@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-2.5.1-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-2.5.2-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/codex-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -39,7 +39,7 @@ Codex Pulse launches automatically after installation. The default location is `
 | Task status | Red indicates model execution, yellow indicates tools or commands, and green indicates completion |
 | Session continuity | Keep one session identity across every route without rewriting the Codex session database |
 
-Codex Pulse supports the Responses API and can locally convert Chat Completions providers such as DeepSeek to the protocol required by Codex. The built-in connection test validates the Base URL, API key, model, and protocol before a provider is enabled.
+Codex Pulse supports the Responses API and can locally convert Chat Completions providers such as DeepSeek to the protocol required by Codex. GPT‑5.6 third-party routes automatically apply a Responses Lite compatibility override. The built-in connection test validates the Base URL, API key, model, and protocol before a provider is enabled.
 
 ## Usage
 
@@ -57,7 +57,7 @@ The menu bar icon continuously reflects the current task status. A three-color t
 
 ## Manual Installation
 
-Download [`Codex-Pulse-2.5.1.dmg`](dist/Codex-Pulse-2.5.1.dmg), open it, and drag `Codex Pulse.app` into `Applications`.
+Download [`Codex-Pulse-2.5.2.dmg`](dist/Codex-Pulse-2.5.2.dmg), open it, and drag `Codex Pulse.app` into `Applications`.
 
 If macOS blocks the first launch, right-click the app in Finder and select `Open`.
 
@@ -71,7 +71,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-The app is generated at `build/Codex Pulse.app`, and the installer is generated at `dist/Codex-Pulse-2.5.1.dmg`.
+The app is generated at `build/Codex Pulse.app`, and the installer is generated at `dist/Codex-Pulse-2.5.2.dmg`.
 
 ## Privacy and Security
 
@@ -93,4 +93,4 @@ If Codex Pulse is useful to you, you can support its ongoing maintenance through
   <img src="docs/assets/wechat-pay.jpg" alt="WeChat payment QR code" width="320">
 </p>
 
-Current version: `2.5.1`
+Current version: `2.5.2`

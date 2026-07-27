@@ -68,6 +68,7 @@ private struct ProviderDatabase: Codable {
     var providers: [ProviderProfile]
     var selectedProviderID: String?
     var officialModel: String?
+    var officialModelCatalogJSON: String?
 }
 
 enum ProviderStoreError: LocalizedError {
@@ -98,6 +99,8 @@ enum ProviderStore {
     static func selectedProviderID() -> String? { load().selectedProviderID }
 
     static func officialModel() -> String? { load().officialModel }
+
+    static func officialModelCatalogJSON() -> String? { load().officialModelCatalogJSON }
 
     static func saveProviders(_ providers: [ProviderProfile], selectedProviderID: String?) throws {
         let normalizedIDs = providers.map { $0.id.lowercased() }
@@ -175,10 +178,21 @@ enum ProviderStore {
         try save(database)
     }
 
+    static func setOfficialModelCatalogJSON(_ path: String?) throws {
+        var database = load()
+        database.officialModelCatalogJSON = path
+        try save(database)
+    }
+
     private static func load() -> ProviderDatabase {
         guard let data = try? Data(contentsOf: databaseURL),
               let database = try? JSONDecoder().decode(ProviderDatabase.self, from: data) else {
-            return ProviderDatabase(providers: [.codeAPI], selectedProviderID: "codeapi", officialModel: nil)
+            return ProviderDatabase(
+                providers: [.codeAPI],
+                selectedProviderID: "codeapi",
+                officialModel: nil,
+                officialModelCatalogJSON: nil
+            )
         }
         return database
     }
