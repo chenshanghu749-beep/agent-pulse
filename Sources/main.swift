@@ -561,6 +561,40 @@ if CommandLine.arguments.contains("--login-status-test") {
         print("MODEL_CATALOG_ERROR \(error.localizedDescription)")
         exit(EXIT_FAILURE)
     }
+} else if CommandLine.arguments.contains("--pinwheel-preview") {
+    let scale: CGFloat = 8
+    let cellSize = NSSize(width: 34 * scale, height: 24 * scale)
+    let preview = NSImage(
+        size: NSSize(width: cellSize.width * 3, height: cellSize.height),
+        flipped: false
+    ) { rect in
+        NSColor.windowBackgroundColor.setFill()
+        rect.fill()
+        for (index, signal) in TrafficSignal.allCases.enumerated() {
+            let icon = StatusIconRenderer.image(
+                style: .pinwheel,
+                active: signal,
+                frame: index * 3
+            )
+            let target = NSRect(
+                x: CGFloat(index) * cellSize.width + (cellSize.width - icon.size.width * scale) / 2,
+                y: (cellSize.height - icon.size.height * scale) / 2,
+                width: icon.size.width * scale,
+                height: icon.size.height * scale
+            )
+            icon.draw(in: target, from: .zero, operation: .sourceOver, fraction: 1)
+        }
+        return true
+    }
+    let outputURL = URL(fileURLWithPath: "/tmp/codex-pulse-pinwheel-preview.png")
+    guard let tiff = preview.tiffRepresentation,
+          let bitmap = NSBitmapImageRep(data: tiff),
+          let png = bitmap.representation(using: .png, properties: [:]) else {
+        print("PINWHEEL_PREVIEW_ERROR 无法生成预览图")
+        exit(EXIT_FAILURE)
+    }
+    try! png.write(to: outputURL, options: .atomic)
+    print("PINWHEEL_PREVIEW_OK \(outputURL.path)")
 } else if CommandLine.arguments.contains("--self-test") {
     let sample = """
     model = "gpt-5.6-sol"

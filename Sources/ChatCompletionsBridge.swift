@@ -40,7 +40,7 @@ enum ProviderConnectionTester {
         request.timeoutInterval = 15
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Codex-Pulse/2.5.2", forHTTPHeaderField: "User-Agent")
+        request.setValue("Codex-Pulse/2.5.3", forHTTPHeaderField: "User-Agent")
 
         let body: [String: Any]
         switch format {
@@ -87,7 +87,7 @@ enum ProviderConnectionTester {
         request.timeoutInterval = 10
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Codex-Pulse/2.5.2", forHTTPHeaderField: "User-Agent")
+        request.setValue("Codex-Pulse/2.5.3", forHTTPHeaderField: "User-Agent")
 
         let (data, response): (Data, URLResponse)
         do {
@@ -286,7 +286,7 @@ final class ChatCompletionsBridge {
             upstream.timeoutInterval = 180
             upstream.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             upstream.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            upstream.setValue("Codex-Pulse/2.5.2", forHTTPHeaderField: "User-Agent")
+            upstream.setValue("Codex-Pulse/2.5.3", forHTTPHeaderField: "User-Agent")
             upstream.httpBody = try JSONSerialization.data(withJSONObject: chatBody)
 
             URLSession.shared.dataTask(with: upstream) { [weak self] data, response, error in
