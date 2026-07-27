@@ -2,10 +2,10 @@
 set -euo pipefail
 
 readonly APP_NAME="Codex Pulse.app"
-readonly VERSION="2.4.8"
+readonly VERSION="2.4.9"
 readonly DMG_NAME="Codex-Pulse-${VERSION}.dmg"
 readonly DMG_URL="https://raw.githubusercontent.com/chenshanghu749-beep/codex-pulse/main/dist/${DMG_NAME}"
-readonly EXPECTED_SHA256="645a49fb6ac8174391bd1df994f6673a5815db4c35b9c350a577ea3a03e8436b"
+readonly EXPECTED_SHA256="965e79088528f0284078738bd87096caa494f69258f7ff6aead4d0714731eebd"
 
 install_dir="${CODEX_PULSE_INSTALL_DIR:-${CODEAPI_STATUS_INSTALL_DIR:-$HOME/Applications}}"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/codex-pulse-install.XXXXXX")"
@@ -43,6 +43,14 @@ fi
 
 /bin/mkdir -p "$install_dir"
 /usr/bin/ditto "$source_app" "$target_app"
+lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+widget_extension="$target_app/Contents/PlugIns/CodexPulseWidget.appex"
+if [[ -x "$lsregister" ]]; then
+    "$lsregister" -f "$target_app" >/dev/null 2>&1 || true
+fi
+if [[ -d "$widget_extension" ]]; then
+    /usr/bin/pluginkit -a "$widget_extension" >/dev/null 2>&1 || true
+fi
 /usr/bin/hdiutil detach "$mount_dir" >/dev/null
 mounted=false
 

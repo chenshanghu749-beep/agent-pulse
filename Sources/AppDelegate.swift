@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         AppThemePreference.apply(AppThemePreference.selected)
         installTextEditingCommands()
         ensureChatCompletionsBridge()
+        WidgetRegistration.ensureRegistered()
 
         do {
             _ = try RouteConfigManager.migrateLegacyCredentialCommandIfNeeded()

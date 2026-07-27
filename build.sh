@@ -38,6 +38,10 @@ swiftc \
   -o "$WIDGET_MACOS_DIR/CodexPulseWidget"
 
 cp "$ROOT_DIR/WidgetExtension/Info.plist" "$WIDGET_CONTENTS_DIR/Info.plist"
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT_DIR/Resources/Info.plist")"
+APP_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ROOT_DIR/Resources/Info.plist")"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$WIDGET_CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUILD" "$WIDGET_CONTENTS_DIR/Info.plist"
 chmod +x "$WIDGET_MACOS_DIR/CodexPulseWidget"
 
 swiftc \
