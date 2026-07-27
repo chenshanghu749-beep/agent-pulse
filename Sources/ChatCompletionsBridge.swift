@@ -4,6 +4,8 @@ import Network
 enum ProviderConnectionError: LocalizedError {
     case invalidURL
     case invalidResponse
+    case timeout
+    case modelUnavailable(String)
     case server(Int, String)
     case bridgeUnavailable(String)
 
@@ -13,6 +15,10 @@ enum ProviderConnectionError: LocalizedError {
             return "Base URL 无效。"
         case .invalidResponse:
             return "提供商返回了无法识别的数据。"
+        case .timeout:
+            return "连接超时。提供商已收到请求，但模型服务未在 15 秒内返回。"
+        case let .modelUnavailable(model):
+            return "API Key 有效，但模型列表中没有 \(model)。"
         case let .server(code, message):
             return "请求失败（HTTP \(code)）：\(message)"
         case let .bridgeUnavailable(message):
@@ -23,14 +29,18 @@ enum ProviderConnectionError: LocalizedError {
 
 enum ProviderConnectionTester {
     static func test(profile: ProviderProfile, key: String) async throws -> String {
+        if profile.isCodeAPI {
+            return try await testCodeAPI(profile: profile, key: key)
+        }
+
         let format = profile.effectiveAPIFormat
         let endpoint = try endpointURL(profile: profile, format: format)
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = 25
+        request.timeoutInterval = 15
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Codex-Pulse/2.5.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Codex-Pulse/2.5.1", forHTTPHeaderField: "User-Agent")
 
         let body: [String: Any]
         switch format {
@@ -52,7 +62,12 @@ enum ProviderConnectionTester {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let startedAt = Date()
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await self.data(for: request, timeout: 15)
+        } catch let error as URLError where error.code == .timedOut {
+            throw ProviderConnectionError.timeout
+        }
         guard let http = response as? HTTPURLResponse else { throw ProviderConnectionError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw ProviderConnectionError.server(http.statusCode, errorMessage(from: data))
@@ -63,6 +78,62 @@ enum ProviderConnectionTester {
         let duration = Date().timeIntervalSince(startedAt)
         let protocolName = format == .chatCompletions ? "Chat Completions · 本地桥接" : "Responses API"
         return String(format: "连接成功 · %@ · %.1f 秒", protocolName, duration)
+    }
+
+    private static func testCodeAPI(profile: ProviderProfile, key: String) async throws -> String {
+        let usage = try await CodeAPIClient.fetch(key: key)
+        let modelsURL = try codeAPIModelsURL(profile: profile)
+        var request = URLRequest(url: modelsURL)
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Codex-Pulse/2.5.1", forHTTPHeaderField: "User-Agent")
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await self.data(for: request, timeout: 10)
+        } catch let error as URLError where error.code == .timedOut {
+            throw ProviderConnectionError.timeout
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw ProviderConnectionError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ProviderConnectionError.server(http.statusCode, errorMessage(from: data))
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = object["data"] as? [[String: Any]] else {
+            throw ProviderConnectionError.invalidResponse
+        }
+        let models = Set(entries.compactMap { $0["id"] as? String })
+        guard models.contains(profile.model) else {
+            throw ProviderConnectionError.modelUnavailable(profile.model)
+        }
+        return String(format: "连接成功 · CodeAPI · 余额 $%.2f · 模型可用", usage.balance)
+    }
+
+    private static func codeAPIModelsURL(profile: ProviderProfile) throws -> URL {
+        var base = profile.normalizedBaseURL
+        if !base.lowercased().hasSuffix("/v1") {
+            base += "/v1"
+        }
+        guard let url = URL(string: base + "/models") else {
+            throw ProviderConnectionError.invalidURL
+        }
+        return url
+    }
+
+    private static func data(
+        for request: URLRequest,
+        timeout: TimeInterval
+    ) async throws -> (Data, URLResponse) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
+        configuration.waitsForConnectivity = false
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        return try await session.data(for: request)
     }
 
     static func endpointURL(profile: ProviderProfile, format: ProviderAPIFormat) throws -> URL {
@@ -215,7 +286,7 @@ final class ChatCompletionsBridge {
             upstream.timeoutInterval = 180
             upstream.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             upstream.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            upstream.setValue("Codex-Pulse/2.5.0", forHTTPHeaderField: "User-Agent")
+            upstream.setValue("Codex-Pulse/2.5.1", forHTTPHeaderField: "User-Agent")
             upstream.httpBody = try JSONSerialization.data(withJSONObject: chatBody)
 
             URLSession.shared.dataTask(with: upstream) { [weak self] data, response, error in

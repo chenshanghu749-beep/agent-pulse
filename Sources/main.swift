@@ -520,6 +520,24 @@ if CommandLine.arguments.contains("--login-status-test") {
         FileHandle.standardError.write(Data("ROUTE_CONFIG_REPAIR_ERROR \(error.localizedDescription)\n".utf8))
         exit(EXIT_FAILURE)
     }
+} else if CommandLine.arguments.contains("--provider-connection-test") {
+    let semaphore = DispatchSemaphore(value: 0)
+    Task.detached {
+        defer { semaphore.signal() }
+        guard let providerID = ProviderStore.selectedProviderID(),
+              let profile = ProviderStore.provider(id: providerID),
+              let key = CredentialStore.load(providerID: providerID) else {
+            print("PROVIDER_CONNECTION_ERROR 未找到当前提供商或 API Key。")
+            return
+        }
+        do {
+            let result = try await ProviderConnectionTester.test(profile: profile, key: key)
+            print("PROVIDER_CONNECTION_OK \(result)")
+        } catch {
+            print("PROVIDER_CONNECTION_ERROR \(error.localizedDescription)")
+        }
+    }
+    semaphore.wait()
 } else if CommandLine.arguments.contains("--self-test") {
     let sample = """
     model = "gpt-5.6-sol"
@@ -605,7 +623,7 @@ if CommandLine.arguments.contains("--login-status-test") {
         legacyProfile: .codeAPI
     )
     precondition(codeAPIConfig.hasPrefix("model_provider = \"openai\""))
-    precondition(codeAPIConfig.contains("openai_base_url = \"https://codeapi.nexita.net\""))
+    precondition(codeAPIConfig.contains("openai_base_url = \"https://codeapi.nexita.net/v1\""))
     precondition(codeAPIConfig.contains("[model_providers.codeapi_status_custom]"))
     precondition(codeAPIConfig.contains("[model_providers.codeapi]"))
     precondition(codeAPIConfig.components(separatedBy: "[model_providers.codeapi]").count == 2)

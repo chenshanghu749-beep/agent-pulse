@@ -310,9 +310,13 @@ enum RouteConfigManager {
     }
 
     private static func activeBaseURL(for profile: ProviderProfile) -> String {
-        profile.effectiveAPIFormat == .chatCompletions
-            ? ChatCompletionsBridge.baseURL(providerID: profile.id)
-            : profile.normalizedBaseURL
+        if profile.effectiveAPIFormat == .chatCompletions {
+            return ChatCompletionsBridge.baseURL(providerID: profile.id)
+        }
+        if profile.isCodeAPI, !profile.normalizedBaseURL.lowercased().hasSuffix("/v1") {
+            return profile.normalizedBaseURL + "/v1"
+        }
+        return profile.normalizedBaseURL
     }
 
     private static func topLevelProvider(in content: String) -> String? {

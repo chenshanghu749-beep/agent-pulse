@@ -9,7 +9,7 @@
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Codex Pulse Widget</string>
     <key>CFBundlePackageType</key><string>XPC!</string>
-    <key>CFBundleShortVersionString</key><string>2.5.0</string>
+    <key>CFBundleShortVersionString</key><string>2.5.1</string>
     <key>CFBundleVersion</key><string>26</string>
     <key>CFBundleSupportedPlatforms</key>
     <array><string>MacOSX</string></array>

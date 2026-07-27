@@ -692,16 +692,20 @@ final class SettingsWindowController: NSWindowController {
         testProviderButton.isEnabled = false
         testProviderButton.title = "正在测试…"
         statusLabel.textColor = .secondaryLabelColor
-        statusLabel.stringValue = "正在发送最小模型请求…"
+        statusLabel.stringValue = draft.profile.isCodeAPI
+            ? "正在验证账户与模型…"
+            : "正在发送最小模型请求…"
         Task {
+            defer {
+                testProviderButton.isEnabled = true
+                testProviderButton.title = "测试连接"
+            }
             do {
                 let result = try await ProviderConnectionTester.test(profile: draft.profile, key: draft.key)
                 showSuccess(result)
             } catch {
                 showError(error.localizedDescription)
             }
-            testProviderButton.isEnabled = true
-            testProviderButton.title = "测试连接"
         }
     }
 
