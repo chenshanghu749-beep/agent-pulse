@@ -484,64 +484,68 @@ enum StatusIconRenderer {
     }
 
     private static func pinwheel(active: TrafficSignal, frame: Int) -> NSImage {
-        canvas(width: 27) { _ in
-            let center = NSPoint(x: 13.5, y: 10.2)
+        canvas(width: 29) { _ in
+            let center = NSPoint(x: 14.5, y: 9.0)
 
             let pole = NSBezierPath()
             pole.move(to: NSPoint(x: center.x, y: center.y - 1.8))
-            pole.line(to: NSPoint(x: center.x, y: 1.1))
+            pole.line(to: NSPoint(x: center.x, y: 0.5))
             NSColor.labelColor.withAlphaComponent(0.78).setStroke()
             pole.lineWidth = 1.6
             pole.lineCapStyle = .round
             pole.stroke()
 
-            let degreesPerFrame: CGFloat
+            let degreesPerSecond: CGFloat
             switch active {
-            case .red: degreesPerFrame = 74
-            case .yellow: degreesPerFrame = 31
-            case .green: degreesPerFrame = 8
+            case .red: degreesPerSecond = 740
+            case .yellow: degreesPerSecond = 310
+            case .green: degreesPerSecond = 80
             }
-            let rotation = CGFloat(frame) * degreesPerFrame
+            let rotation = CGFloat(frame) / 60 * degreesPerSecond
 
-            for bladeIndex in 0..<5 {
+            for bladeIndex in 0..<4 {
                 NSGraphicsContext.saveGraphicsState()
                 let transform = NSAffineTransform()
                 transform.translateX(by: center.x, yBy: center.y)
-                transform.rotate(byDegrees: rotation + CGFloat(bladeIndex) * 72)
+                transform.rotate(byDegrees: rotation + CGFloat(bladeIndex) * 90)
                 transform.concat()
 
                 let blade = NSBezierPath()
                 blade.move(to: NSPoint(x: -0.7, y: 1.4))
                 blade.curve(
-                    to: NSPoint(x: -0.7, y: 7.3),
-                    controlPoint1: NSPoint(x: -0.6, y: 3.6),
-                    controlPoint2: NSPoint(x: -1.3, y: 6.2)
+                    to: NSPoint(x: -0.8, y: 8.1),
+                    controlPoint1: NSPoint(x: -0.4, y: 3.9),
+                    controlPoint2: NSPoint(x: -1.6, y: 6.9)
                 )
                 blade.curve(
-                    to: NSPoint(x: 0.4, y: 8.0),
-                    controlPoint1: NSPoint(x: -0.5, y: 7.8),
-                    controlPoint2: NSPoint(x: 0.0, y: 8.1)
+                    to: NSPoint(x: 0.4, y: 8.9),
+                    controlPoint1: NSPoint(x: -0.6, y: 8.6),
+                    controlPoint2: NSPoint(x: 0.0, y: 9.0)
                 )
                 blade.curve(
-                    to: NSPoint(x: 1.5, y: 7.5),
-                    controlPoint1: NSPoint(x: 0.8, y: 8.0),
-                    controlPoint2: NSPoint(x: 1.3, y: 7.8)
-                )
-                blade.line(to: NSPoint(x: 4.8, y: 4.6))
-                blade.curve(
-                    to: NSPoint(x: 5.1, y: 3.8),
-                    controlPoint1: NSPoint(x: 5.1, y: 4.3),
-                    controlPoint2: NSPoint(x: 5.2, y: 4.0)
+                    to: NSPoint(x: 1.8, y: 8.3),
+                    controlPoint1: NSPoint(x: 0.9, y: 8.9),
+                    controlPoint2: NSPoint(x: 1.5, y: 8.7)
                 )
                 blade.curve(
-                    to: NSPoint(x: 4.5, y: 3.3),
-                    controlPoint1: NSPoint(x: 5.0, y: 3.5),
-                    controlPoint2: NSPoint(x: 4.8, y: 3.3)
+                    to: NSPoint(x: 5.8, y: 5.1),
+                    controlPoint1: NSPoint(x: 3.0, y: 7.8),
+                    controlPoint2: NSPoint(x: 5.0, y: 6.2)
+                )
+                blade.curve(
+                    to: NSPoint(x: 6.1, y: 4.2),
+                    controlPoint1: NSPoint(x: 6.1, y: 4.8),
+                    controlPoint2: NSPoint(x: 6.2, y: 4.4)
+                )
+                blade.curve(
+                    to: NSPoint(x: 5.3, y: 3.6),
+                    controlPoint1: NSPoint(x: 6.0, y: 3.9),
+                    controlPoint2: NSPoint(x: 5.7, y: 3.6)
                 )
                 blade.curve(
                     to: NSPoint(x: 0.8, y: 1.2),
-                    controlPoint1: NSPoint(x: 3.0, y: 2.5),
-                    controlPoint2: NSPoint(x: 1.7, y: 1.5)
+                    controlPoint1: NSPoint(x: 4.0, y: 3.3),
+                    controlPoint2: NSPoint(x: 2.0, y: 1.8)
                 )
                 blade.close()
                 NSColor.windowBackgroundColor.setFill()

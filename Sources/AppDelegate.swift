@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var targetSignal: TrafficSignal = .green
     private var transitionStartedAt = Date.distantPast
     private var animationFrame = 0
+    private let iconAnimationStartUptime = ProcessInfo.processInfo.systemUptime
     private lazy var settings = SettingsWindowController(appDelegate: self)
     private let chatCompletionsBridge = ChatCompletionsBridge()
 
@@ -57,10 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         taskTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refreshTaskActivity() }
         }
-        iconAnimationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        iconAnimationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.animationFrame += 1
-                self?.renderStatusButton()
+                guard let self else { return }
+                let elapsed = ProcessInfo.processInfo.systemUptime - self.iconAnimationStartUptime
+                self.animationFrame = Int(elapsed * 60)
+                self.renderStatusButton()
             }
         }
         [usageTimer, taskTimer, iconAnimationTimer].compactMap { $0 }.forEach {

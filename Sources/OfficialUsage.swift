@@ -225,7 +225,7 @@ enum OfficialUsageClient {
         }
 
         let messages = [
-            "{\"method\":\"initialize\",\"id\":0,\"params\":{\"clientInfo\":{\"name\":\"codex_pulse\",\"title\":\"Codex Pulse\",\"version\":\"2.5.3\"}}}",
+            "{\"method\":\"initialize\",\"id\":0,\"params\":{\"clientInfo\":{\"name\":\"codex_pulse\",\"title\":\"Codex Pulse\",\"version\":\"2.5.4\"}}}",
             "{\"method\":\"initialized\",\"params\":{}}",
             "{\"method\":\"account/read\",\"id\":1,\"params\":{\"refreshToken\":true}}",
             "{\"method\":\"account/rateLimits/read\",\"id\":6}",
