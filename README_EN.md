@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-2.6.0-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-2.6.1-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/codex-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -36,8 +36,8 @@ Agent Pulse launches automatically after installation. The default location is `
 | --- | --- |
 | Agent selection | Select, monitor, and launch Codex or Cursor |
 | Route switching | Quickly switch between the official OpenAI route and multiple custom providers |
-| Usage display | View balance, quota, reset time, and token activity from the menu bar |
-| Task status | Read Codex logs and Cursor Hooks: red for execution, yellow for tools, and green for completion |
+| Usage display | Show Cursor official remaining usage and a CodeAPI provider balance together |
+| Task status | Read Codex logs and Cursor 3.10 Hooks: red for execution, yellow for tools, and green for completion |
 | Session continuity | Never rewrite the Codex or Cursor session database |
 
 Agent Pulse supports the Responses API and can locally convert Chat Completions providers such as DeepSeek to the protocol required by Codex. Cursor BYOK remains managed by Cursor’s official Models settings.
@@ -46,8 +46,8 @@ Agent Pulse supports the Responses API and can locally convert Chat Completions 
 
 1. Open Agent Pulse and select `Codex` or `Cursor`.
 2. Codex supports official OpenAI and tested third-party providers.
-3. Cursor BYOK is configured through Cursor’s official Models page; Agent Pulse installs status Hooks automatically.
-4. Click `Apply and Open` to launch the selected Agent.
+3. Cursor BYOK remains in Cursor Models; optionally authorize official usage and select a provider balance.
+4. Click `Apply and Open`; updated Hooks restart Cursor so status sync takes effect immediately.
 
 The menu bar icon continuously reflects the current task status. A three-color transition animation runs at launch, during route changes, and immediately before a task returns to the completed state.
 
@@ -59,7 +59,7 @@ The menu bar icon continuously reflects the current task status. A three-color t
 
 ## Manual Installation
 
-Download [`Agent-Pulse-2.6.0.dmg`](dist/Agent-Pulse-2.6.0.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
+Download [`Agent-Pulse-2.6.1.dmg`](dist/Agent-Pulse-2.6.1.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
 
 If macOS blocks the first launch, right-click the app in Finder and select `Open`.
 
@@ -73,7 +73,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-2.6.0.dmg`.
+The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-2.6.1.dmg`.
 
 ## Privacy and Security
 
@@ -81,6 +81,7 @@ The app is generated at `build/Agent Pulse.app`, and the installer is generated 
 - Credential files use `600` permissions and the credential directory uses `700` permissions.
 - Relevant local configuration and session metadata are backed up before route changes.
 - Official authentication is backed up before entering a third-party route, then restored when switching back while third-party API keys remain isolated.
+- Cursor official usage requires explicit consent; the login token is used in memory only and is never copied or persisted.
 - Cursor Hooks record only running, tool, and completion states—not prompts, responses, or conversation content.
 - Agent Pulse does not use macOS Keychain and does not repeatedly trigger Keychain authorization prompts.
 
@@ -96,4 +97,4 @@ If Agent Pulse is useful to you, you can support its ongoing maintenance through
   <img src="docs/assets/wechat-pay.jpg" alt="WeChat payment QR code" width="320">
 </p>
 
-Current version: `2.6.0`
+Current version: `2.6.1`

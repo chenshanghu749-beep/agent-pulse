@@ -17,6 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var latestCodeUsage: UsageResponse?
     private var latestOfficialUsage: OfficialUsageSnapshot?
     private var latestCursorStatus = CursorStatus.unavailable
+    private var latestCursorOfficialUsage: CursorOfficialUsageSnapshot?
+    private var latestCursorProviderUsage: UsageResponse?
+    private var cursorHooksNeedRestart = false
     private var latestError: String?
     private var lastUpdated: Date?
     private var isRefreshingUsage = false
@@ -48,7 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         route = RouteConfigManager.currentRoute()
         if agent == .cursor {
             do {
-                try CursorIntegration.installHooks()
+                cursorHooksNeedRestart = try CursorIntegration.installHooks()
+                if cursorHooksNeedRestart {
+                    latestError = "Cursor 状态 Hooks 已更新，请重启 Cursor 使其生效。"
+                }
             } catch {
                 latestError = error.localizedDescription
             }
@@ -141,6 +147,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         latestError = nil
         latestCodeUsage = nil
         latestOfficialUsage = nil
+        latestCursorOfficialUsage = nil
+        latestCursorProviderUsage = nil
         taskSnapshot = TaskActivitySnapshot(state: .ready, changedAt: nil)
         startStartupChase()
         updateStatusTitle()
@@ -156,6 +164,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusIconStyle = style
         StatusIconPreference.selected = style
         renderStatusButton()
+        rebuildMainMenu()
+    }
+
+    func cursorHooksDidRestart() {
+        cursorHooksNeedRestart = false
+        latestError = nil
         rebuildMainMenu()
     }
 
@@ -217,7 +231,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateStatusTitle() {
         guard let button = statusItem?.button else { return }
         if agent == .cursor {
-            button.title = "Cursor"
+            var parts = ["Cursor"]
+            if let usage = latestCursorOfficialUsage {
+                if let remaining = usage.remainingPercent {
+                    parts.append(percent(remaining))
+                } else {
+                    parts.append(money(Double(usage.remainingCents) / 100))
+                }
+            }
+            if let usage = latestCursorProviderUsage {
+                parts.append(money(usage.balance))
+            }
+            button.title = parts.joined(separator: " · ")
             button.toolTip = "Agent Pulse · Cursor"
             return
         }
@@ -315,7 +340,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 latestCursorStatus = await Task.detached(priority: .utility) {
                     CursorIntegration.readCLIStatus(appInstalled: appInstalled)
                 }.value
-                latestError = latestCursorStatus.isInstalled ? nil : latestCursorStatus.detail
+                var errors: [String] = []
+                if !latestCursorStatus.isInstalled {
+                    errors.append(latestCursorStatus.detail)
+                }
+                if CursorUsagePreference.officialUsageEnabled {
+                    do {
+                        latestCursorOfficialUsage = try await CursorOfficialUsageClient.fetch()
+                    } catch {
+                        latestCursorOfficialUsage = nil
+                        errors.append(error.localizedDescription)
+                    }
+                } else {
+                    latestCursorOfficialUsage = nil
+                }
+                latestCursorProviderUsage = nil
+                if let id = CursorUsagePreference.providerID,
+                   let provider = ProviderStore.provider(id: id),
+                   provider.isCodeAPI {
+                    if let key = CredentialStore.load(providerID: id), !key.isEmpty {
+                        do {
+                            latestCursorProviderUsage = try await CodeAPIClient.fetch(key: key)
+                        } catch {
+                            errors.append("\(provider.name)：\(error.localizedDescription)")
+                        }
+                    } else {
+                        errors.append("\(provider.name) 尚未配置 API Key")
+                    }
+                }
+                if cursorHooksNeedRestart {
+                    errors.append("状态 Hooks 已更新，请重启 Cursor。")
+                } else if !CursorIntegration.hooksInstalled() {
+                    errors.append("Cursor 状态 Hooks 不完整，请在设置中重新应用。")
+                }
+                latestError = errors.isEmpty ? nil : errors.joined(separator: "；")
                 lastUpdated = Date()
                 updateStatusTitle()
                 return
@@ -386,7 +444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let dashboardTitle: String
         if agent == .cursor {
-            dashboardTitle = "打开 Cursor 模型设置"
+            dashboardTitle = "打开 Cursor 用量页面"
         } else {
             switch route {
             case .official: dashboardTitle = "打开官方用量页面"
@@ -488,13 +546,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         let authText: String
-        switch latestCursorStatus.isAuthenticated {
-        case .some(true): authText = "已登录"
-        case .some(false): authText = "未登录"
-        case .none: authText = latestCursorStatus.cliAvailable ? "登录状态未知" : "未安装 cursor-agent CLI"
+        if latestCursorOfficialUsage != nil {
+            authText = "已登录"
+        } else {
+            switch latestCursorStatus.isAuthenticated {
+            case .some(true): authText = "CLI 已登录"
+            case .some(false): authText = "CLI 未登录"
+            case .none: authText = latestCursorStatus.cliAvailable ? "登录状态未知" : "未安装 cursor-agent CLI"
+            }
         }
         menu.addItem(info("账号  \(authText)"))
+        if CursorUsagePreference.officialUsageEnabled {
+            if let usage = latestCursorOfficialUsage {
+                if let remaining = usage.remainingPercent {
+                    menu.addItem(info("官方用量剩余  \(percent(remaining))", emphasis: true))
+                }
+                menu.addItem(info("官方剩余额度  \(money(Double(usage.remainingCents) / 100))"))
+                menu.addItem(info(
+                    "本期已用  \(money(Double(usage.usedCents) / 100)) / \(money(Double(usage.limitCents) / 100))"
+                ))
+                if let end = usage.billingCycleEnd {
+                    menu.addItem(info("账期结束  \(resetFormatter.string(from: end))"))
+                }
+            } else {
+                menu.addItem(info("正在读取 Cursor 官方用量…"))
+            }
+        } else {
+            menu.addItem(info("官方用量  未授权（可在设置中启用）"))
+        }
+        if let id = CursorUsagePreference.providerID,
+           let provider = ProviderStore.provider(id: id) {
+            if let usage = latestCursorProviderUsage {
+                menu.addItem(.separator())
+                menu.addItem(info("\(provider.name) 余额  \(money(usage.balance))", emphasis: true))
+                menu.addItem(info("今日费用  \(money(usage.usage.today.actualCost))"))
+                menu.addItem(info("今日 Token  \(number(usage.usage.today.totalTokens))"))
+            } else {
+                menu.addItem(info("提供商  \(provider.name) · \(provider.model)"))
+            }
+        }
+        menu.addItem(.separator())
         menu.addItem(info("状态 Hooks  \(CursorIntegration.hooksInstalled() ? "已启用" : "未启用")"))
+        if let diagnostic = CursorActivityReader.diagnostic() {
+            menu.addItem(info("最近事件  \(diagnostic)"))
+        } else {
+            menu.addItem(info("最近事件  暂无（配置后需重启 Cursor）"))
+        }
+        if cursorHooksNeedRestart {
+            let restart = NSMenuItem(
+                title: "重新启动 Cursor 以启用状态同步",
+                action: #selector(restartCursorForHooks),
+                keyEquivalent: ""
+            )
+            restart.target = self
+            menu.addItem(restart)
+        }
         if !latestCursorStatus.detail.isEmpty {
             menu.addItem(info(latestCursorStatus.detail))
         }
@@ -551,6 +657,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             route: route,
             codeUsage: latestCodeUsage,
             officialUsage: latestOfficialUsage,
+            cursorOfficialUsage: latestCursorOfficialUsage,
+            cursorProviderUsage: latestCursorProviderUsage,
             task: taskSnapshot
         )
     }
@@ -577,13 +685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openUsageDashboard() {
         if agent == .cursor {
-            Task {
-                do {
-                    try await CursorLauncher.openModelSettings()
-                } catch {
-                    presentLaunchWarning(error.localizedDescription)
-                }
-            }
+            NSWorkspace.shared.open(URL(string: "https://cursor.com/dashboard?tab=usage")!)
             return
         }
         switch route {
@@ -610,6 +712,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+        }
+    }
+
+    @objc private func restartCursorForHooks() {
+        Task {
+            do {
+                try await CursorLauncher.restart()
+                cursorHooksDidRestart()
+                await refreshTaskActivity()
+                await refreshUsage()
+            } catch {
+                latestError = error.localizedDescription
+                rebuildMainMenu()
+            }
         }
     }
 

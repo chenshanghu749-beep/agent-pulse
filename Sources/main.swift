@@ -906,29 +906,38 @@ if CommandLine.arguments.contains("--login-status-test") {
     {
       "version": 1,
       "hooks": {
-        "beforeShellCommand": [{"command": "/usr/bin/true"}]
+        "beforeShellCommand": [
+          {"command": "/usr/bin/true"},
+          {"command": "\\\"\(cursorSupport.appendingPathComponent("cursor-hook.sh").path)\\\" waiting"}
+        ]
       }
     }
     """
     try! Data(existingHooks.utf8).write(to: cursorConfig.appendingPathComponent("hooks.json"))
-    try! CursorIntegration.installHooks(
+    let firstHooksInstallChanged = try! CursorIntegration.installHooks(
         cursorDirectory: cursorConfig,
         supportDirectory: cursorSupport
     )
-    try! CursorIntegration.installHooks(
+    let secondHooksInstallChanged = try! CursorIntegration.installHooks(
         cursorDirectory: cursorConfig,
         supportDirectory: cursorSupport
     )
+    precondition(firstHooksInstallChanged)
+    precondition(!secondHooksInstallChanged)
     let installedHooksData = try! Data(contentsOf: cursorConfig.appendingPathComponent("hooks.json"))
     let installedHooksRoot = try! JSONSerialization.jsonObject(with: installedHooksData) as! [String: Any]
     let installedHooks = installedHooksRoot["hooks"] as! [String: Any]
     let beforeShellHooks = installedHooks["beforeShellCommand"] as! [[String: String]]
     precondition(beforeShellHooks.contains { $0["command"] == "/usr/bin/true" })
+    precondition(installedHooks["beforeShellExecution"] != nil)
+    precondition(installedHooks["afterShellExecution"] != nil)
+    precondition(installedHooks["preToolUse"] != nil)
+    precondition(installedHooks["postToolUse"] != nil)
     let pulseHookCount = installedHooks.values.reduce(0) { count, value in
         let entries = value as? [[String: String]] ?? []
         return count + entries.filter { $0["command"]?.contains("cursor-hook.sh") == true }.count
     }
-    precondition(pulseHookCount == 7)
+    precondition(pulseHookCount == 14)
 
     let cursorState = cursorTestRoot.appendingPathComponent("cursor-state.json")
     let cursorTimestamp = Date().timeIntervalSince1970
@@ -941,6 +950,24 @@ if CommandLine.arguments.contains("--login-status-test") {
     try! Data("{\"state\":\"ready\",\"timestamp\":\(cursorTimestamp)}".utf8)
         .write(to: cursorState)
     precondition(CursorActivityReader.read(stateURL: cursorState).state == .ready)
+
+    let cursorUsageFixture = Data("""
+    {
+      "billingCycleStart": "1785196800",
+      "billingCycleEnd": "1787875200",
+      "planUsage": {
+        "totalSpend": 725,
+        "remaining": 1275,
+        "limit": 2000,
+        "remainingBonus": 100
+      }
+    }
+    """.utf8)
+    let cursorUsage = try! CursorOfficialUsageClient.parse(cursorUsageFixture)
+    precondition(cursorUsage.usedCents == 725)
+    precondition(cursorUsage.remainingCents == 1275)
+    precondition(cursorUsage.limitCents == 2000)
+    precondition(abs((cursorUsage.remainingPercent ?? 0) - 63.75) < 0.001)
     print("SELF_TEST_OK")
 } else {
     MainActor.assumeIsolated {

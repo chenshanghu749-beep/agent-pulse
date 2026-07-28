@@ -46,6 +46,8 @@ enum CodexPulseWidgetStore {
         route: RouteChoice,
         codeUsage: UsageResponse?,
         officialUsage: OfficialUsageSnapshot?,
+        cursorOfficialUsage: CursorOfficialUsageSnapshot?,
+        cursorProviderUsage: UsageResponse?,
         task: TaskActivitySnapshot
     ) {
         var routeName = "Codex · \(route.displayName)"
@@ -60,9 +62,34 @@ enum CodexPulseWidgetStore {
         if agent == .cursor {
             routeName = "Cursor"
             modelName = "Cursor Agent"
-            primaryValue = "Cursor"
-            primaryLabel = "当前 Agent"
-            detail = "状态 Hooks · 自动同步"
+            if let cursorOfficialUsage {
+                if let remaining = cursorOfficialUsage.remainingPercent {
+                    primaryValue = String(format: "%.0f%%", remaining)
+                    primaryLabel = "Cursor 官方用量剩余"
+                } else {
+                    primaryValue = String(
+                        format: "$%.2f",
+                        Double(cursorOfficialUsage.remainingCents) / 100
+                    )
+                    primaryLabel = "Cursor 官方剩余额度"
+                }
+                if let cursorProviderUsage {
+                    detail = "提供商余额 $\(String(format: "%.2f", cursorProviderUsage.balance))"
+                } else {
+                    detail = "账期内已用 $\(String(format: "%.2f", Double(cursorOfficialUsage.usedCents) / 100))"
+                }
+            } else if let cursorProviderUsage {
+                primaryValue = String(format: "$%.2f", cursorProviderUsage.balance)
+                primaryLabel = "提供商余额"
+                detail = "今日费用 $\(String(format: "%.2f", cursorProviderUsage.usage.today.actualCost))"
+                inputTokens = cursorProviderUsage.usage.today.inputTokens
+                outputTokens = cursorProviderUsage.usage.today.outputTokens
+                totalTokens = cursorProviderUsage.usage.today.totalTokens
+            } else {
+                primaryValue = "Cursor"
+                primaryLabel = "当前 Agent"
+                detail = "状态 Hooks · 自动同步"
+            }
         } else {
             switch route {
             case let .provider(id):

@@ -93,6 +93,8 @@ final class SettingsWindowController: NSWindowController {
     )
     private let routeDescription = NSTextField(wrappingLabelWithString: "")
     private let routeProviderPopup = NSPopUpButton()
+    private let cursorBalanceProviderPopup = NSPopUpButton()
+    private let cursorOfficialUsageSwitch = NSSwitch()
     private let providerPopup = NSPopUpButton()
     private let nameField = NSTextField()
     private let baseURLField = NSTextField()
@@ -105,6 +107,8 @@ final class SettingsWindowController: NSWindowController {
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let cursorModelsButton = NSButton(title: "打开模型设置", target: nil, action: nil)
     private let confirmButton = NSButton(title: "应用并打开", target: nil, action: nil)
+    private weak var codexRouteCard: NSView?
+    private weak var cursorRouteCard: NSView?
 
     init(appDelegate: AppDelegate) {
         self.appDelegate = appDelegate
@@ -246,6 +250,11 @@ final class SettingsWindowController: NSWindowController {
         routeProviderPopup.target = self
         routeProviderPopup.action = #selector(routeProviderChanged)
         routeProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
+        cursorBalanceProviderPopup.target = self
+        cursorBalanceProviderPopup.action = #selector(cursorBalanceProviderChanged)
+        cursorBalanceProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
+        cursorOfficialUsageSwitch.target = self
+        cursorOfficialUsageSwitch.action = #selector(cursorOfficialUsageChanged)
         routeDescription.textColor = .secondaryLabelColor
         routeDescription.font = .systemFont(ofSize: 12)
         routeDescription.isSelectable = true
@@ -305,13 +314,33 @@ final class SettingsWindowController: NSWindowController {
             detail: "API Key 与模型由 Cursor 官方 Models 设置管理，Agent Pulse 不读取或改写 Cursor 会话数据库。",
             control: cursorModelsButton
         )
+        let cursorOfficialUsageRow = settingRow(
+            title: "官方用量",
+            detail: "允许读取 Cursor 本地登录状态并查询官方剩余额度；登录令牌只在内存中使用，不会保存。",
+            control: cursorOfficialUsageSwitch
+        )
+        let cursorBalanceRow = settingRow(
+            title: "提供商余额",
+            detail: "选择 Agent Pulse 中已配置的提供商。CodeAPI 可显示余额，其他提供商显示名称与模型。",
+            control: cursorBalanceProviderPopup
+        )
+        let codexCard = card([routeRow, separator(), providerRow, separator(), historyRow])
+        let cursorCard = card([
+            cursorOfficialUsageRow,
+            separator(),
+            cursorBalanceRow,
+            separator(),
+            cursorRow
+        ])
+        codexRouteCard = codexCard
+        cursorRouteCard = cursorCard
         return page(
             title: "路由",
             subtitle: "选择 Agent，以及它使用的模型来源。",
             cards: [
                 card([agentRow]),
-                card([routeRow, separator(), providerRow, separator(), historyRow]),
-                card([cursorRow])
+                codexCard,
+                cursorCard
             ]
         )
     }
@@ -526,14 +555,20 @@ final class SettingsWindowController: NSWindowController {
 
     func present() {
         providers = ProviderStore.providers()
-        agentControl.selectedSegment = AgentKind.allCases.firstIndex(of: AgentPreference.selected) ?? 0
+        let selectedAgent = AgentPreference.selected
+        agentControl.selectedSegment = AgentKind.allCases.firstIndex(of: selectedAgent) ?? 0
         let route = RouteConfigManager.currentRoute()
         routeControl.selectedSegment = route == .official ? 0 : 1
-        if case let .provider(id) = route {
+        if selectedAgent == .cursor,
+           let cursorProviderID = CursorUsagePreference.providerID,
+           providers.contains(where: { $0.id == cursorProviderID }) {
+            selectedProviderID = cursorProviderID
+        } else if case let .provider(id) = route {
             selectedProviderID = id
         } else {
             selectedProviderID = ProviderStore.selectedProviderID() ?? providers.first?.id
         }
+        cursorOfficialUsageSwitch.state = CursorUsagePreference.officialUsageEnabled ? .on : .off
         reloadProviderPopups()
         loadSelectedProvider()
         statusLabel.stringValue = ""
@@ -561,6 +596,12 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func agentChanged() {
         statusLabel.stringValue = ""
+        if selectedAgent() == .cursor,
+           let id = CursorUsagePreference.providerID,
+           providers.contains(where: { $0.id == id }) {
+            selectedProviderID = id
+            selectProvider(id, in: cursorBalanceProviderPopup)
+        }
         updateRouteFields()
         updateConfirmButtonTitle()
     }
@@ -572,6 +613,20 @@ final class SettingsWindowController: NSWindowController {
         loadSelectedProvider()
         routeControl.selectedSegment = 1
         updateRouteFields()
+    }
+
+    @objc private func cursorBalanceProviderChanged() {
+        guard let id = selectedProviderID(from: cursorBalanceProviderPopup) else { return }
+        selectedProviderID = id
+        selectProvider(id, in: providerPopup)
+        loadSelectedProvider()
+        statusLabel.stringValue = ""
+    }
+
+    @objc private func cursorOfficialUsageChanged() {
+        statusLabel.stringValue = cursorOfficialUsageSwitch.state == .on
+            ? "启用后，Agent Pulse 会使用 Cursor 本地登录状态查询官方用量，不会保存登录令牌。"
+            : ""
     }
 
     @objc private func iconStyleChanged() {
@@ -596,9 +651,13 @@ final class SettingsWindowController: NSWindowController {
         let selectedAgent = selectedAgent()
         let isCodex = selectedAgent == .codex
         let custom = routeControl.selectedSegment == 1
+        codexRouteCard?.isHidden = !isCodex
+        cursorRouteCard?.isHidden = isCodex
         routeControl.isEnabled = isCodex
         routeProviderPopup.isEnabled = isCodex && custom && !providers.isEmpty
         cursorModelsButton.isEnabled = !isCodex
+        cursorBalanceProviderPopup.isEnabled = !isCodex && !providers.isEmpty
+        cursorOfficialUsageSwitch.isEnabled = !isCodex
         if isCodex {
             routeDescription.stringValue = custom
                 ? "第三方路由使用当前选中的提供商。应用后 Codex 会重新启动，但本地会话不会删除。"
@@ -620,18 +679,22 @@ final class SettingsWindowController: NSWindowController {
     private func reloadProviderPopups() {
         providerPopup.removeAllItems()
         routeProviderPopup.removeAllItems()
+        cursorBalanceProviderPopup.removeAllItems()
         let titles = ProviderStore.popupTitles(for: providers)
         for (provider, title) in zip(providers, titles) {
             addProviderItem(title: title, providerID: provider.id, to: providerPopup)
             addProviderItem(title: title, providerID: provider.id, to: routeProviderPopup)
+            addProviderItem(title: title, providerID: provider.id, to: cursorBalanceProviderPopup)
         }
         if let id = selectedProviderID, providers.contains(where: { $0.id == id }) {
             selectProvider(id, in: providerPopup)
             selectProvider(id, in: routeProviderPopup)
+            selectProvider(id, in: cursorBalanceProviderPopup)
         } else if !providers.isEmpty {
             selectedProviderID = providers[0].id
             selectProvider(providers[0].id, in: providerPopup)
             selectProvider(providers[0].id, in: routeProviderPopup)
+            selectProvider(providers[0].id, in: cursorBalanceProviderPopup)
         }
         updateRouteFields()
     }
@@ -711,6 +774,9 @@ final class SettingsWindowController: NSWindowController {
             try CredentialStore.delete(providerID: id)
             providers.remove(at: index)
             selectedProviderID = providers.indices.contains(index) ? providers[index].id : providers.last?.id
+            if CursorUsagePreference.providerID == id {
+                CursorUsagePreference.providerID = selectedProviderID
+            }
             try ProviderStore.saveProviders(providers, selectedProviderID: selectedProviderID)
             reloadProviderPopups()
             loadSelectedProvider()
@@ -907,12 +973,23 @@ final class SettingsWindowController: NSWindowController {
 
         Task {
             do {
-                try CursorIntegration.installHooks()
+                let hooksChanged = try CursorIntegration.installHooks()
+                CursorUsagePreference.officialUsageEnabled = cursorOfficialUsageSwitch.state == .on
+                CursorUsagePreference.providerID = selectedProviderID(
+                    from: cursorBalanceProviderPopup
+                )
                 AgentPreference.selected = .cursor
                 appDelegate?.agentDidChange(to: .cursor)
-                statusLabel.stringValue = "正在打开 Cursor…"
-                try await CursorLauncher.launch()
-                showSuccess("Cursor 已连接，状态 Hooks 已启用。")
+                statusLabel.stringValue = hooksChanged
+                    ? "正在重启 Cursor 以启用状态 Hooks…"
+                    : "正在打开 Cursor…"
+                if hooksChanged {
+                    try await CursorLauncher.restart()
+                    appDelegate?.cursorHooksDidRestart()
+                } else {
+                    try await CursorLauncher.launch()
+                }
+                showSuccess("Cursor 已连接，用量与状态同步已启用。")
                 confirmButton.title = "连接成功"
                 window?.close()
             } catch {

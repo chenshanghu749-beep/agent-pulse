@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-2.6.0-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-2.6.1-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/codex-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -38,8 +38,8 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/codex-pulse/mai
 | --- | --- |
 | Agent 切换 | 在 Codex 与 Cursor 之间选择、监控并快速启动 |
 | 路由切换 | 在 OpenAI 官方路由和多个自定义提供商之间快速切换 |
-| 用量展示 | 在菜单栏查看余额、配额、重置时间及 Token 活动 |
-| 任务状态 | 同时支持 Codex 日志与 Cursor Hooks；红色执行、黄色工具、绿色完成 |
+| 用量展示 | 同时查看 Cursor 官方剩余用量和 CodeAPI 提供商余额 |
+| 任务状态 | 支持 Codex 日志及 Cursor 3.10 Hooks；红色执行、黄色工具、绿色完成 |
 | 会话保持 | 不改写 Codex 或 Cursor 的会话数据库 |
 
 支持 Responses API，并可在本机将 DeepSeek 等 Chat Completions 接口转换为 Codex 所需协议。GPT‑5.6 第三方路由会自动应用 Responses Lite 兼容配置。提供商配置支持连接测试，可在启用前校验 Base URL、API Key、模型与协议。
@@ -48,8 +48,8 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/codex-pulse/mai
 
 1. 打开 Agent Pulse，选择 `Codex` 或 `Cursor`。
 2. Codex 可选择 OpenAI 官方路由，或配置第三方提供商并测试连接。
-3. Cursor 使用官方 Models 页面管理 BYOK；Agent Pulse 自动安装状态 Hooks。
-4. 点击“应用并打开”，应用会启动所选 Agent。
+3. Cursor 使用官方 Models 页面管理 BYOK；可授权读取官方用量，并选择一个提供商展示余额。
+4. 点击“应用并打开”，Hooks 更新后会重启 Cursor，使状态同步立即生效。
 
 菜单栏图标会持续显示当前任务状态。启动、切换路由以及任务完成前会播放一次三色过渡动画。
 
@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/codex-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-2.6.0.dmg`](dist/Agent-Pulse-2.6.0.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-2.6.1.dmg`](dist/Agent-Pulse-2.6.1.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -75,13 +75,14 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.6.0.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.6.1.dmg`。
 
 ## 隐私与安全
 
 - API Key 仅保存在本机，不会写入提供商列表或上传到仓库。
 - 凭据文件权限为 `600`，凭据目录权限为 `700`。
 - 路由切换前会备份相关本地配置，不会修改 Codex 会话数据库。
+- Cursor 官方用量需用户明确授权；登录令牌仅在请求期间保留于内存，不会复制或持久化。
 - Cursor Hooks 只记录执行、工具和完成状态，不记录提示词、回复或会话内容。
 - 进入第三方路由前会备份官方登录，切回官方时自动恢复并隔离第三方 API Key。
 - 应用不使用 macOS 钥匙串，不会反复触发钥匙串授权弹窗。
@@ -103,4 +104,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`2.6.0`
+当前版本：`2.6.1`
