@@ -94,8 +94,13 @@ chmod +x build.sh package.sh
 
 如果 Agent Pulse 对你有帮助，可以通过微信支持项目的持续维护。
 
-<p align="center">
-  <img src="docs/assets/wechat-pay.jpg" alt="微信收款码" width="320">
-</p>
+<details>
+  <summary>📷 点击展开收款码</summary>
+
+  <p align="center">
+    <img src="docs/assets/wechat-pay.jpg" alt="微信收款码" width="320">
+  </p>
+
+</details>
 
 当前版本：`2.6.0`
