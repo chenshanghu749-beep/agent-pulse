@@ -586,7 +586,7 @@ if CommandLine.arguments.contains("--login-status-test") {
         }
         return true
     }
-    let outputURL = URL(fileURLWithPath: "/tmp/codex-pulse-pinwheel-preview.png")
+    let outputURL = URL(fileURLWithPath: "/tmp/agent-pulse-pinwheel-preview.png")
     guard let tiff = preview.tiffRepresentation,
           let bitmap = NSBitmapImageRep(data: tiff),
           let png = bitmap.representation(using: .png, properties: [:]) else {
@@ -848,7 +848,7 @@ if CommandLine.arguments.contains("--login-status-test") {
     }
 
     let taskRoot = FileManager.default.temporaryDirectory
-        .appendingPathComponent("codeapi-status-task-test-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("agent-pulse-task-test-\(UUID().uuidString)", isDirectory: true)
     try! FileManager.default.createDirectory(at: taskRoot, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: taskRoot) }
 
@@ -968,9 +968,39 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(cursorUsage.remainingCents == 1275)
     precondition(cursorUsage.limitCents == 2000)
     precondition(abs((cursorUsage.remainingPercent ?? 0) - 63.75) < 0.001)
+    let cursorSplitUsageFixture = Data("""
+    {
+      "billingCycleEnd": 1787875200000,
+      "autoLimit": 1000,
+      "apiLimit": 2000,
+      "autoPercentUsed": 100,
+      "apiPercentUsed": 25,
+      "totalPercentUsed": 50
+    }
+    """.utf8)
+    let cursorSplitUsage = try! CursorOfficialUsageClient.parse(cursorSplitUsageFixture)
+    precondition(cursorSplitUsage.autoRemainingPercent == 0)
+    precondition(cursorSplitUsage.apiRemainingPercent == 75)
+    precondition(cursorSplitUsage.remainingPercent == 75)
+    precondition(cursorSplitUsage.compactUsageText == "A 0% · API 75%")
+    let cursorRatioFixture = Data("""
+    {"planUsage":{"autoPercentUsed":0.25,"apiPercentUsed":1}}
+    """.utf8)
+    let cursorRatioUsage = try! CursorOfficialUsageClient.parse(cursorRatioFixture)
+    precondition(cursorRatioUsage.autoRemainingPercent == 75)
+    precondition(cursorRatioUsage.apiRemainingPercent == 0)
+    let cursorTeamUsageFixture = Data("""
+    {"spendLimitUsage":{"overallUsed":300,"overallLimit":1000,"overallRemaining":700}}
+    """.utf8)
+    let cursorTeamUsage = try! CursorOfficialUsageClient.parse(cursorTeamUsageFixture)
+    precondition(cursorTeamUsage.usedCents == 300)
+    precondition(cursorTeamUsage.remainingCents == 700)
+    precondition(cursorTeamUsage.remainingPercent == 70)
     print("SELF_TEST_OK")
 } else {
     MainActor.assumeIsolated {
+        AppIdentity.migrateLegacyPreferencesIfNeeded()
+        _ = try? CredentialStore.migrateLegacyDirectoryIfNeeded()
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate

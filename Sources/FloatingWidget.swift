@@ -1,7 +1,7 @@
 import Foundation
 import WidgetKit
 
-struct CodexPulseWidgetData: Codable {
+struct AgentPulseWidgetData: Codable {
     let updatedAt: Date
     let routeName: String
     let modelName: String
@@ -14,7 +14,7 @@ struct CodexPulseWidgetData: Codable {
     let taskText: String
     let taskColor: String
 
-    static let placeholder = CodexPulseWidgetData(
+    static let placeholder = AgentPulseWidgetData(
         updatedAt: Date(),
         routeName: "OpenAI 官方",
         modelName: "Codex",
@@ -29,8 +29,8 @@ struct CodexPulseWidgetData: Codable {
     )
 }
 
-enum CodexPulseWidgetStore {
-    static let kind = "CodexPulseUsageWidget"
+enum AgentPulseWidgetStore {
+    static let kind = "AgentPulseUsageWidget"
     static let dataDirectoryName = "Agent Pulse"
     static let dataFileName = "widget-data.json"
 
@@ -63,8 +63,8 @@ enum CodexPulseWidgetStore {
             routeName = "Cursor"
             modelName = "Cursor Agent"
             if let cursorOfficialUsage {
-                if let remaining = cursorOfficialUsage.remainingPercent {
-                    primaryValue = String(format: "%.0f%%", remaining)
+                if let compact = cursorOfficialUsage.compactUsageText {
+                    primaryValue = compact
                     primaryLabel = "Cursor 官方用量剩余"
                 } else {
                     primaryValue = String(
@@ -75,8 +75,10 @@ enum CodexPulseWidgetStore {
                 }
                 if let cursorProviderUsage {
                     detail = "提供商余额 $\(String(format: "%.2f", cursorProviderUsage.balance))"
-                } else {
+                } else if cursorOfficialUsage.limitCents > 0 {
                     detail = "账期内已用 $\(String(format: "%.2f", Double(cursorOfficialUsage.usedCents) / 100))"
+                } else {
+                    detail = cursorOfficialUsage.displayMessage ?? "官方用量自动刷新"
                 }
             } else if let cursorProviderUsage {
                 primaryValue = String(format: "$%.2f", cursorProviderUsage.balance)
@@ -142,7 +144,7 @@ enum CodexPulseWidgetStore {
             taskColor = "green"
         }
 
-        let value = CodexPulseWidgetData(
+        let value = AgentPulseWidgetData(
             updatedAt: Date(), routeName: routeName, modelName: modelName,
             primaryValue: primaryValue, primaryLabel: primaryLabel, detail: detail,
             inputTokens: inputTokens, outputTokens: outputTokens, totalTokens: totalTokens,

@@ -12,7 +12,8 @@ Tests/codex-home/tmp/
 *.p12
 **/codeapi.key
 **/config.toml.codeapi-status.bak
+**/config.toml.agent-pulse.bak
 
 # DMGs are ignored except for the verified installer published by this project.
 *.dmg
-!dist/Agent-Pulse-2.6.1.dmg
+!dist/Agent-Pulse-2.7.0.dmg

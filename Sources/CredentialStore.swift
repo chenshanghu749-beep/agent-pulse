@@ -13,6 +13,11 @@ enum CredentialStoreError: LocalizedError {
 enum CredentialStore {
     static var directoryURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/agent-pulse", isDirectory: true)
+    }
+
+    static var legacyDirectoryURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/codeapi-status", isDirectory: true)
     }
 
@@ -82,5 +87,40 @@ enum CredentialStore {
             attributes: [.posixPermissions: 0o700]
         )
         try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directoryURL.path)
+    }
+
+    @discardableResult
+    static func migrateLegacyDirectoryIfNeeded() throws -> Bool {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: legacyDirectoryURL.path) else { return false }
+        try prepareDirectory()
+        var changed = false
+        let legacyItems = try fileManager.contentsOfDirectory(
+            at: legacyDirectoryURL,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        )
+        for legacyItem in legacyItems {
+            let destination = directoryURL.appendingPathComponent(legacyItem.lastPathComponent)
+            if !fileManager.fileExists(atPath: destination.path) {
+                try fileManager.copyItem(at: legacyItem, to: destination)
+                changed = true
+                continue
+            }
+            guard (try? legacyItem.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+                continue
+            }
+            let children = try fileManager.contentsOfDirectory(
+                at: legacyItem,
+                includingPropertiesForKeys: nil
+            )
+            for child in children {
+                let childDestination = destination.appendingPathComponent(child.lastPathComponent)
+                guard !fileManager.fileExists(atPath: childDestination.path) else { continue }
+                try fileManager.copyItem(at: child, to: childDestination)
+                changed = true
+            }
+        }
+        try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directoryURL.path)
+        return changed
     }
 }

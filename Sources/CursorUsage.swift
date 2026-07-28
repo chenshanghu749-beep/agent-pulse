@@ -6,11 +6,30 @@ struct CursorOfficialUsageSnapshot: Sendable {
     let usedCents: Int
     let limitCents: Int
     let remainingCents: Int
-    let bonusCents: Int?
+    let autoRemainingPercent: Double?
+    let apiRemainingPercent: Double?
+    let totalRemainingPercent: Double?
+    let displayMessage: String?
 
     var remainingPercent: Double? {
-        guard limitCents > 0 else { return nil }
-        return min(100, max(0, Double(remainingCents) / Double(limitCents) * 100))
+        let positivePools = [autoRemainingPercent, apiRemainingPercent]
+            .compactMap { $0 }
+            .filter { $0 > 0 }
+        if let best = positivePools.max() { return best }
+        if let totalRemainingPercent { return totalRemainingPercent }
+        if limitCents > 0 {
+            return min(100, max(0, Double(remainingCents) / Double(limitCents) * 100))
+        }
+        return [autoRemainingPercent, apiRemainingPercent].compactMap { $0 }.max()
+    }
+
+    var compactUsageText: String? {
+        let auto = autoRemainingPercent.map { "A \(String(format: "%.0f%%", $0))" }
+        let api = apiRemainingPercent.map { "API \(String(format: "%.0f%%", $0))" }
+        if let auto, let api { return "\(auto) · \(api)" }
+        if let auto { return auto }
+        if let api { return api }
+        return remainingPercent.map { String(format: "%.0f%%", $0) }
     }
 }
 
@@ -79,20 +98,53 @@ enum CursorOfficialUsageClient {
     }
 
     static func parse(_ data: Data) throws -> CursorOfficialUsageSnapshot {
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let usage = dictionary(root, camel: "planUsage", snake: "plan_usage") else {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CursorOfficialUsageError.invalidResponse
         }
-        let used = integer(usage, camel: "totalSpend", snake: "total_spend") ?? 0
-        let limit = integer(usage, camel: "limit", snake: "limit") ?? 0
-        let remaining = integer(usage, camel: "remaining", snake: "remaining")
-            ?? max(0, limit - used)
-        let remainingBonus = integer(
-            usage,
-            camel: "remainingBonus",
-            snake: "remaining_bonus"
-        )
-        guard limit > 0 || remaining > 0 || used > 0 else {
+        let plan = dictionary(root, camel: "planUsage", snake: "plan_usage")
+        let spend = dictionary(root, camel: "spendLimitUsage", snake: "spend_limit_usage")
+
+        let planUsed = plan.flatMap { integer($0, camel: "totalSpend", snake: "total_spend") } ?? 0
+        let autoLimit = plan.flatMap { integer($0, camel: "autoLimit", snake: "auto_limit") }
+            ?? integer(root, camel: "autoLimit", snake: "auto_limit") ?? 0
+        let apiLimit = plan.flatMap { integer($0, camel: "apiLimit", snake: "api_limit") }
+            ?? integer(root, camel: "apiLimit", snake: "api_limit") ?? 0
+        let planLimit = plan.flatMap { integer($0, camel: "limit", snake: "limit") } ?? 0
+        let planRemaining = plan.flatMap { integer($0, camel: "remaining", snake: "remaining") }
+
+        let spendUsed = spend.flatMap {
+            integer($0, camel: "overallUsed", snake: "overall_used")
+                ?? integer($0, camel: "individualUsed", snake: "individual_used")
+                ?? integer($0, camel: "pooledUsed", snake: "pooled_used")
+        } ?? 0
+        let spendLimit = spend.flatMap {
+            integer($0, camel: "overallLimit", snake: "overall_limit")
+                ?? integer($0, camel: "individualLimit", snake: "individual_limit")
+                ?? integer($0, camel: "pooledLimit", snake: "pooled_limit")
+        } ?? 0
+        let spendRemaining = spend.flatMap {
+            integer($0, camel: "overallRemaining", snake: "overall_remaining")
+                ?? integer($0, camel: "individualRemaining", snake: "individual_remaining")
+                ?? integer($0, camel: "pooledRemaining", snake: "pooled_remaining")
+        }
+
+        let used = planUsed > 0 ? planUsed : spendUsed
+        let splitLimit = autoLimit + apiLimit
+        let limit = planLimit > 0 ? planLimit : (splitLimit > 0 ? splitLimit : spendLimit)
+        let remaining = planRemaining ?? spendRemaining ?? max(0, limit - used)
+        let autoRemaining = plan.flatMap {
+            percentRemaining($0, camel: "autoPercentUsed", snake: "auto_percent_used")
+        } ?? percentRemaining(root, camel: "autoPercentUsed", snake: "auto_percent_used")
+        let apiRemaining = plan.flatMap {
+            percentRemaining($0, camel: "apiPercentUsed", snake: "api_percent_used")
+        } ?? percentRemaining(root, camel: "apiPercentUsed", snake: "api_percent_used")
+        let totalRemaining = plan.flatMap {
+            percentRemaining($0, camel: "totalPercentUsed", snake: "total_percent_used")
+        } ?? percentRemaining(root, camel: "totalPercentUsed", snake: "total_percent_used")
+        let displayMessage = string(root, camel: "displayMessage", snake: "display_message")
+        guard limit > 0 || remaining > 0 || used > 0
+                || autoRemaining != nil || apiRemaining != nil || totalRemaining != nil
+                || displayMessage?.isEmpty == false else {
             throw CursorOfficialUsageError.invalidResponse
         }
         return CursorOfficialUsageSnapshot(
@@ -101,7 +153,10 @@ enum CursorOfficialUsageClient {
             usedCents: used,
             limitCents: limit,
             remainingCents: remaining,
-            bonusCents: remainingBonus
+            autoRemainingPercent: autoRemaining,
+            apiRemainingPercent: apiRemaining,
+            totalRemainingPercent: totalRemaining,
+            displayMessage: displayMessage
         )
     }
 
@@ -160,6 +215,37 @@ enum CursorOfficialUsageClient {
         if let number = raw as? NSNumber { return number.intValue }
         if let string = raw as? String { return Int(string) }
         return nil
+    }
+
+    private static func decimal(
+        _ value: [String: Any],
+        camel: String,
+        snake: String
+    ) -> Double? {
+        let raw = value[camel] ?? value[snake]
+        if let number = raw as? NSNumber { return number.doubleValue }
+        if let string = raw as? String { return Double(string) }
+        return nil
+    }
+
+    private static func string(
+        _ value: [String: Any],
+        camel: String,
+        snake: String
+    ) -> String? {
+        (value[camel] as? String) ?? (value[snake] as? String)
+    }
+
+    private static func percentRemaining(
+        _ value: [String: Any],
+        camel: String,
+        snake: String
+    ) -> Double? {
+        guard var used = decimal(value, camel: camel, snake: snake), used.isFinite else {
+            return nil
+        }
+        if used > 0, used <= 1 { used *= 100 }
+        return min(100, max(0, 100 - used))
     }
 
     private static func date(

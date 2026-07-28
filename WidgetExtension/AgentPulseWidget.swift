@@ -2,7 +2,7 @@ import SwiftUI
 import WidgetKit
 import Darwin
 
-let widgetKind = "CodexPulseUsageWidget"
+let widgetKind = "AgentPulseUsageWidget"
 let widgetDataRelativePath = "Library/Application Support/Agent Pulse/widget-data.json"
 
 struct WidgetData: Codable {
@@ -146,7 +146,7 @@ struct PulseWidgetView: View {
 }
 
 @main
-struct CodexPulseUsageWidget: Widget {
+struct AgentPulseUsageWidget: Widget {
     let kind = widgetKind
 
     var body: some WidgetConfiguration {

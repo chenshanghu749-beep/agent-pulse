@@ -1,7 +1,7 @@
 # Agent Pulse
 
 <p align="center">
-  <img src="docs/assets/codex-pulse.png" alt="Agent Pulse 图标" width="160">
+  <img src="docs/assets/agent-pulse.png" alt="Agent Pulse 图标" width="160">
 </p>
 
 <p align="center">
@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-2.6.1-111111">
-  <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/codex-pulse">
+  <img alt="Release" src="https://img.shields.io/badge/release-2.7.0-111111">
+  <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-13%2B-111111">
@@ -22,7 +22,7 @@ Agent Pulse 是面向 Codex 与 Cursor 的原生 macOS 菜单栏路由与状态�
 ## 快速安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/codex-pulse/main/install.sh | zsh
+curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/main/install.sh | zsh
 ```
 
 安装完成后会自动启动 `Agent Pulse`。默认安装位置为 `~/Applications/Agent Pulse.app`。
@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/codex-pulse/mai
 1. 打开 Agent Pulse，选择 `Codex` 或 `Cursor`。
 2. Codex 可选择 OpenAI 官方路由，或配置第三方提供商并测试连接。
 3. Cursor 使用官方 Models 页面管理 BYOK；可授权读取官方用量，并选择一个提供商展示余额。
-4. 点击“应用并打开”，Hooks 更新后会重启 Cursor，使状态同步立即生效。
+4. 点击“应用并打开”。如果 Cursor 已在运行，Agent Pulse 不会强制重启；更新后的 Hooks 会在下次手动重启 Cursor 后生效。
 
 菜单栏图标会持续显示当前任务状态。启动、切换路由以及任务完成前会播放一次三色过渡动画。
 
@@ -61,21 +61,21 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/codex-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-2.6.1.dmg`](dist/Agent-Pulse-2.6.1.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-2.7.0.dmg`](dist/Agent-Pulse-2.7.0.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
 ## 从源码构建
 
 ```bash
-git clone https://github.com/chenshanghu749-beep/codex-pulse.git
-cd codex-pulse
+git clone https://github.com/chenshanghu749-beep/agent-pulse.git
+cd agent-pulse
 chmod +x build.sh package.sh
 ./build.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.6.1.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.7.0.dmg`。
 
 ## 隐私与安全
 
@@ -89,7 +89,7 @@ chmod +x build.sh package.sh
 
 ## 卸载
 
-退出 Agent Pulse，将 `Agent Pulse.app` 移到废纸篓即可。需要彻底清理配置时，可删除 `~/.codex/codeapi-status/` 与 `~/Library/Application Support/Agent Pulse/`。
+退出 Agent Pulse，将 `Agent Pulse.app` 移到废纸篓即可。需要彻底清理配置时，可删除 `~/.codex/agent-pulse/`、旧版兼容目录 `~/.codex/codeapi-status/` 与 `~/Library/Application Support/Agent Pulse/`。
 
 ## 支持项目
 
@@ -104,4 +104,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`2.6.1`
+当前版本：`2.7.0`

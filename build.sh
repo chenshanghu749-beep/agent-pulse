@@ -8,13 +8,14 @@ CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 PLUGINS_DIR="$CONTENTS_DIR/PlugIns"
-WIDGET_DIR="$PLUGINS_DIR/CodexPulseWidget.appex"
+WIDGET_DIR="$PLUGINS_DIR/AgentPulseWidget.appex"
 WIDGET_CONTENTS_DIR="$WIDGET_DIR/Contents"
 WIDGET_MACOS_DIR="$WIDGET_CONTENTS_DIR/MacOS"
 MODULE_CACHE_DIR="$BUILD_DIR/ModuleCache"
 ICONSET_DIR="$BUILD_DIR/AppIcon.iconset"
 ICON_SOURCE="$BUILD_DIR/AppIcon-1024.png"
 
+/bin/rm -rf "$APP_DIR" "$ICONSET_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$MODULE_CACHE_DIR" "$ICONSET_DIR" "$WIDGET_MACOS_DIR"
 
 swiftc \
@@ -24,7 +25,7 @@ swiftc \
   -framework AppKit \
   -framework WidgetKit \
   "$ROOT_DIR"/Sources/*.swift \
-  -o "$MACOS_DIR/CodexPulse"
+  -o "$MACOS_DIR/AgentPulse"
 
 swiftc \
   -O \
@@ -34,15 +35,15 @@ swiftc \
   -module-cache-path "$MODULE_CACHE_DIR" \
   -framework SwiftUI \
   -framework WidgetKit \
-  "$ROOT_DIR"/WidgetExtension/CodexPulseWidget.swift \
-  -o "$WIDGET_MACOS_DIR/CodexPulseWidget"
+  "$ROOT_DIR"/WidgetExtension/AgentPulseWidget.swift \
+  -o "$WIDGET_MACOS_DIR/AgentPulseWidget"
 
 cp "$ROOT_DIR/WidgetExtension/Info.plist" "$WIDGET_CONTENTS_DIR/Info.plist"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT_DIR/Resources/Info.plist")"
 APP_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ROOT_DIR/Resources/Info.plist")"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$WIDGET_CONTENTS_DIR/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUILD" "$WIDGET_CONTENTS_DIR/Info.plist"
-chmod +x "$WIDGET_MACOS_DIR/CodexPulseWidget"
+chmod +x "$WIDGET_MACOS_DIR/AgentPulseWidget"
 
 swiftc \
   -O \
@@ -72,8 +73,8 @@ swiftc \
 cp "$ROOT_DIR/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$ROOT_DIR/Resources/BasketballMascot.png" "$RESOURCES_DIR/BasketballMascot.png"
 cp "$ROOT_DIR/Resources/TrumpMascot.png" "$RESOURCES_DIR/TrumpMascot.png"
-chmod +x "$MACOS_DIR/CodexPulse"
-codesign --force --sign - --entitlements "$ROOT_DIR/WidgetExtension/CodexPulseWidget.entitlements" "$WIDGET_DIR"
-codesign --force --sign - --entitlements "$ROOT_DIR/Resources/CodexPulse.entitlements" "$APP_DIR"
+chmod +x "$MACOS_DIR/AgentPulse"
+codesign --force --sign - --entitlements "$ROOT_DIR/WidgetExtension/AgentPulseWidget.entitlements" "$WIDGET_DIR"
+codesign --force --sign - --entitlements "$ROOT_DIR/Resources/AgentPulse.entitlements" "$APP_DIR"
 
 echo "$APP_DIR"

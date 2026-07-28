@@ -11,7 +11,7 @@ enum WidgetRegistration {
         let appURL = Bundle.main.bundleURL
         let extensionURL = appURL
             .appendingPathComponent("Contents/PlugIns", isDirectory: true)
-            .appendingPathComponent("CodexPulseWidget.appex", isDirectory: true)
+            .appendingPathComponent("AgentPulseWidget.appex", isDirectory: true)
         guard FileManager.default.fileExists(atPath: extensionURL.path) else { return }
 
         DispatchQueue.global(qos: .utility).async {

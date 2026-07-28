@@ -41,8 +41,10 @@ enum RouteConfigError: LocalizedError {
 
 enum RouteConfigManager {
     static let legacyManagedProviderID = "codeapi_status_custom"
-    static let beginMarker = "# >>> CodeAPI Status managed provider >>>"
-    static let endMarker = "# <<< CodeAPI Status managed provider <<<"
+    static let beginMarker = "# >>> Agent Pulse managed provider >>>"
+    static let endMarker = "# <<< Agent Pulse managed provider <<<"
+    static let legacyBeginMarker = "# >>> CodeAPI Status managed provider >>>"
+    static let legacyEndMarker = "# <<< CodeAPI Status managed provider <<<"
 
     static var configURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -69,8 +71,7 @@ enum RouteConfigManager {
         let topLevel = topLevelProvider(in: content)?.lowercased()
         if topLevel == "openai",
            topLevelValue(named: "openai_base_url", in: content) != nil,
-           content.contains(beginMarker),
-           content.contains(endMarker),
+           containsManagedBlock(content),
            let selectedProviderID,
            profiles.contains(where: { $0.id == selectedProviderID }) {
             return .provider(selectedProviderID)
@@ -131,7 +132,7 @@ enum RouteConfigManager {
                 try CodexModelCatalog.prepareIfNeeded(model: $0.model)
             }
             if fileManager.fileExists(atPath: configURL.path) {
-                let backup = directory.appendingPathComponent("config.toml.codeapi-status.bak")
+                let backup = directory.appendingPathComponent("config.toml.agent-pulse.bak")
                 try Data(existing.utf8).write(to: backup, options: .atomic)
             }
             let profiles = ProviderStore.providers()
@@ -156,9 +157,10 @@ enum RouteConfigManager {
     @discardableResult
     static func migrateLegacyCredentialCommandIfNeeded() throws -> Bool {
         guard let content = try? String(contentsOf: configURL, encoding: .utf8),
-              content.contains(beginMarker),
-              content.contains(endMarker),
-              content.contains("command = \"/usr/bin/security\"") else {
+              containsManagedBlock(content),
+              content.contains("command = \"/usr/bin/security\"")
+                || content.contains(CredentialStore.legacyDirectoryURL.path)
+                || content.contains(legacyBeginMarker) else {
             return false
         }
         try apply(currentRoute())
@@ -168,8 +170,7 @@ enum RouteConfigManager {
     @discardableResult
     static func reconcileManagedProvidersIfNeeded() throws -> Bool {
         guard let content = try? String(contentsOf: configURL, encoding: .utf8),
-              content.contains(beginMarker),
-              content.contains(endMarker) else { return false }
+              containsManagedBlock(content) else { return false }
         let profiles = ProviderStore.providers()
         var requiredIDs = profiles.map { codexProviderID(for: $0.id) }
         if ProviderStore.selectedProviderID() != nil { requiredIDs.append(legacyManagedProviderID) }
@@ -369,13 +370,20 @@ enum RouteConfigManager {
 
     private static func removingManagedBlocks(from content: String) -> String {
         var result = content
-        while let start = result.range(of: beginMarker),
-              let end = result.range(of: endMarker, range: start.lowerBound..<result.endIndex) {
-            var upper = end.upperBound
-            if upper < result.endIndex, result[upper] == "\n" { upper = result.index(after: upper) }
-            result.removeSubrange(start.lowerBound..<upper)
+        for markers in [(beginMarker, endMarker), (legacyBeginMarker, legacyEndMarker)] {
+            while let start = result.range(of: markers.0),
+                  let end = result.range(of: markers.1, range: start.lowerBound..<result.endIndex) {
+                var upper = end.upperBound
+                if upper < result.endIndex, result[upper] == "\n" { upper = result.index(after: upper) }
+                result.removeSubrange(start.lowerBound..<upper)
+            }
         }
         return result
+    }
+
+    private static func containsManagedBlock(_ content: String) -> Bool {
+        (content.contains(beginMarker) && content.contains(endMarker))
+            || (content.contains(legacyBeginMarker) && content.contains(legacyEndMarker))
     }
 
     private static func removingProviderTables(

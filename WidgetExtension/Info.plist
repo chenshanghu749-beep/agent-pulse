@@ -4,13 +4,13 @@
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
     <key>CFBundleDisplayName</key><string>Agent Pulse</string>
-    <key>CFBundleExecutable</key><string>CodexPulseWidget</string>
-    <key>CFBundleIdentifier</key><string>net.nexita.codeapi-status.widget</string>
+    <key>CFBundleExecutable</key><string>AgentPulseWidget</string>
+    <key>CFBundleIdentifier</key><string>net.nexita.agent-pulse.widget</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Agent Pulse Widget</string>
     <key>CFBundlePackageType</key><string>XPC!</string>
-    <key>CFBundleShortVersionString</key><string>2.6.0</string>
-    <key>CFBundleVersion</key><string>31</string>
+    <key>CFBundleShortVersionString</key><string>2.7.0</string>
+    <key>CFBundleVersion</key><string>33</string>
     <key>CFBundleSupportedPlatforms</key>
     <array><string>MacOSX</string></array>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -20,7 +20,7 @@
         <key>NSExtensionAttributes</key>
         <dict>
             <key>WKAppBundleIdentifier</key>
-            <string>net.nexita.codeapi-status</string>
+            <string>net.nexita.agent-pulse</string>
         </dict>
     </dict>
 </dict>

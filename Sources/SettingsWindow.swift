@@ -53,13 +53,14 @@ enum AppThemePreference {
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private enum Section: Int, CaseIterable {
-        case route, providers, appearance
+        case route, providers, appearance, version
 
         var title: String {
             switch self {
             case .route: return "路由"
             case .providers: return "提供商"
             case .appearance: return "状态与外观"
+            case .version: return "版本"
             }
         }
 
@@ -68,6 +69,7 @@ final class SettingsWindowController: NSWindowController {
             case .route: return "arrow.triangle.branch"
             case .providers: return "server.rack"
             case .appearance: return "circle.lefthalf.filled"
+            case .version: return "arrow.triangle.2.circlepath"
             }
         }
     }
@@ -107,6 +109,10 @@ final class SettingsWindowController: NSWindowController {
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let cursorModelsButton = NSButton(title: "打开模型设置", target: nil, action: nil)
     private let confirmButton = NSButton(title: "应用并打开", target: nil, action: nil)
+    private let currentVersionLabel = NSTextField(labelWithString: AppUpdateChecker.currentVersion)
+    private let updateStatusLabel = NSTextField(wrappingLabelWithString: "尚未检查更新")
+    private let checkUpdateButton = NSButton(title: "检查更新", target: nil, action: nil)
+    private let openProjectButton = NSButton(title: "打开项目主页", target: nil, action: nil)
     private weak var codexRouteCard: NSView?
     private weak var cursorRouteCard: NSView?
 
@@ -235,6 +241,7 @@ final class SettingsWindowController: NSWindowController {
         pages[.route] = buildRoutePage()
         pages[.providers] = buildProvidersPage()
         pages[.appearance] = buildAppearancePage()
+        pages[.version] = buildVersionPage()
         selectSection(.route)
     }
 
@@ -255,6 +262,10 @@ final class SettingsWindowController: NSWindowController {
         cursorBalanceProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
         cursorOfficialUsageSwitch.target = self
         cursorOfficialUsageSwitch.action = #selector(cursorOfficialUsageChanged)
+        checkUpdateButton.target = self
+        checkUpdateButton.action = #selector(checkForUpdates)
+        openProjectButton.target = self
+        openProjectButton.action = #selector(openProjectPage)
         routeDescription.textColor = .secondaryLabelColor
         routeDescription.font = .systemFont(ofSize: 12)
         routeDescription.isSelectable = true
@@ -405,6 +416,33 @@ final class SettingsWindowController: NSWindowController {
             title: "状态与外观",
             subtitle: "自定义 Agent Pulse 的显示方式。",
             cards: [card([themeRow, separator(), iconRow]), card([padded(preview, vertical: 13)])]
+        )
+    }
+
+    private func buildVersionPage() -> NSView {
+        currentVersionLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        currentVersionLabel.isSelectable = true
+        updateStatusLabel.font = .systemFont(ofSize: 12)
+        updateStatusLabel.textColor = .secondaryLabelColor
+        updateStatusLabel.maximumNumberOfLines = 2
+        updateStatusLabel.isSelectable = true
+        let currentRow = settingRow(
+            title: "当前版本",
+            detail: "已安装的 Agent Pulse 版本。",
+            control: currentVersionLabel
+        )
+        let actions = NSStackView(views: [openProjectButton, checkUpdateButton])
+        actions.orientation = .horizontal
+        actions.spacing = 8
+        let updateRow = settingRow(
+            title: "软件更新",
+            detail: "从 Agent Pulse 官方 GitHub 仓库检查最新版本。",
+            control: actions
+        )
+        return page(
+            title: "版本",
+            subtitle: "查看当前版本并检查是否有可用更新。",
+            cards: [card([currentRow, separator(), updateRow]), card([padded(updateStatusLabel, vertical: 13)])]
         )
     }
 
@@ -582,6 +620,8 @@ final class SettingsWindowController: NSWindowController {
         }
         updateRouteFields()
         selectSection(.route)
+        currentVersionLabel.stringValue = AppUpdateChecker.currentVersion
+        checkForUpdates()
 
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
@@ -645,6 +685,37 @@ final class SettingsWindowController: NSWindowController {
         AppThemePreference.selected = theme
         AppThemePreference.apply(theme)
         showSuccess("已切换为\(theme.displayName)主题。")
+    }
+
+    @objc private func openProjectPage() {
+        NSWorkspace.shared.open(AppIdentity.repositoryURL)
+    }
+
+    @objc private func checkForUpdates() {
+        guard checkUpdateButton.isEnabled else { return }
+        checkUpdateButton.isEnabled = false
+        checkUpdateButton.title = "正在检查…"
+        updateStatusLabel.textColor = .secondaryLabelColor
+        updateStatusLabel.stringValue = "正在连接 GitHub 检查最新版本…"
+        Task {
+            defer {
+                checkUpdateButton.isEnabled = true
+                checkUpdateButton.title = "检查更新"
+            }
+            do {
+                let status = try await AppUpdateChecker.check()
+                if status.updateAvailable {
+                    updateStatusLabel.textColor = .systemOrange
+                    updateStatusLabel.stringValue = "发现新版本 \(status.latestVersion)，当前版本为 \(status.currentVersion)。"
+                } else {
+                    updateStatusLabel.textColor = .systemGreen
+                    updateStatusLabel.stringValue = "当前已是最新版本 \(status.currentVersion)。"
+                }
+            } catch {
+                updateStatusLabel.textColor = .systemRed
+                updateStatusLabel.stringValue = "检查失败：\(error.localizedDescription)"
+            }
+        }
     }
 
     private func updateRouteFields() {
@@ -973,6 +1044,7 @@ final class SettingsWindowController: NSWindowController {
 
         Task {
             do {
+                let cursorWasRunning = CursorLauncher.isRunning
                 let hooksChanged = try CursorIntegration.installHooks()
                 CursorUsagePreference.officialUsageEnabled = cursorOfficialUsageSwitch.state == .on
                 CursorUsagePreference.providerID = selectedProviderID(
@@ -980,16 +1052,13 @@ final class SettingsWindowController: NSWindowController {
                 )
                 AgentPreference.selected = .cursor
                 appDelegate?.agentDidChange(to: .cursor)
-                statusLabel.stringValue = hooksChanged
-                    ? "正在重启 Cursor 以启用状态 Hooks…"
-                    : "正在打开 Cursor…"
-                if hooksChanged {
-                    try await CursorLauncher.restart()
-                    appDelegate?.cursorHooksDidRestart()
-                } else {
-                    try await CursorLauncher.launch()
-                }
-                showSuccess("Cursor 已连接，用量与状态同步已启用。")
+                statusLabel.stringValue = "正在打开 Cursor…"
+                try await CursorLauncher.launch()
+                let restartRequired = hooksChanged && cursorWasRunning
+                appDelegate?.cursorHooksDidChange(restartRequired: restartRequired)
+                showSuccess(restartRequired
+                    ? "Cursor 已连接；Hooks 将在下次手动重启 Cursor 后生效。"
+                    : "Cursor 已连接，用量与状态同步已启用。")
                 confirmButton.title = "连接成功"
                 window?.close()
             } catch {

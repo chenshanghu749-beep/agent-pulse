@@ -3,10 +3,10 @@ set -euo pipefail
 
 readonly APP_NAME="Agent Pulse.app"
 readonly LEGACY_APP_NAME="Codex Pulse.app"
-readonly VERSION="2.6.1"
+readonly VERSION="2.7.0"
 readonly DMG_NAME="Agent-Pulse-${VERSION}.dmg"
-readonly DMG_URL="https://raw.githubusercontent.com/chenshanghu749-beep/codex-pulse/main/dist/${DMG_NAME}"
-readonly EXPECTED_SHA256="60416ccc45f2eb83f9a65b526e0a3daffe49ef29ab43ff790e42ecb3680d88d7"
+readonly DMG_URL="https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/main/dist/${DMG_NAME}"
+readonly EXPECTED_SHA256="78d3e710ff110ec6ce5d5d48b405abf82e6535ebe00f74e4b8ec292f1c80faa8"
 
 install_dir="${AGENT_PULSE_INSTALL_DIR:-${CODEX_PULSE_INSTALL_DIR:-${CODEAPI_STATUS_INSTALL_DIR:-$HOME/Applications}}}"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-pulse-install.XXXXXX")"
@@ -43,20 +43,29 @@ if [[ ! -d "$source_app" ]]; then
 fi
 
 /bin/mkdir -p "$install_dir"
-/usr/bin/ditto "$source_app" "$target_app"
+trash_dir="$HOME/.Trash"
+/bin/mkdir -p "$trash_dir"
+
+move_existing_to_trash() {
+    local app_path="$1"
+    local backup_name="$2"
+    [[ -d "$app_path" ]] || return 0
+    local backup_path="$trash_dir/$backup_name"
+    if [[ -e "$backup_path" ]]; then
+        backup_path="$trash_dir/${backup_name%.app} $(/bin/date +%Y%m%d-%H%M%S).app"
+    fi
+    /bin/mv "$app_path" "$backup_path"
+    echo "旧版已移到废纸篓：$backup_path"
+}
+
+move_existing_to_trash "$target_app" "Agent Pulse（升级前）.app"
 legacy_app="$install_dir/$LEGACY_APP_NAME"
 if [[ -d "$legacy_app" && "$legacy_app" != "$target_app" ]]; then
-    trash_dir="$HOME/.Trash"
-    legacy_backup="$trash_dir/Codex Pulse（升级前）.app"
-    /bin/mkdir -p "$trash_dir"
-    if [[ -e "$legacy_backup" ]]; then
-        legacy_backup="$trash_dir/Codex Pulse（升级前 $(/bin/date +%Y%m%d-%H%M%S)）.app"
-    fi
-    /bin/mv "$legacy_app" "$legacy_backup"
-    echo "旧版已移到废纸篓：$legacy_backup"
+    move_existing_to_trash "$legacy_app" "Codex Pulse（升级前）.app"
 fi
+/usr/bin/ditto "$source_app" "$target_app"
 lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-widget_extension="$target_app/Contents/PlugIns/CodexPulseWidget.appex"
+widget_extension="$target_app/Contents/PlugIns/AgentPulseWidget.appex"
 if [[ -x "$lsregister" ]]; then
     "$lsregister" -f "$target_app" >/dev/null 2>&1 || true
 fi

@@ -173,6 +173,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMainMenu()
     }
 
+    func cursorHooksDidChange(restartRequired: Bool) {
+        cursorHooksNeedRestart = restartRequired
+        latestError = restartRequired ? "Cursor 状态 Hooks 已更新，下次手动重启 Cursor 后生效。" : nil
+        rebuildMainMenu()
+    }
+
     func presentLaunchWarning(_ message: String) {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
@@ -233,8 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if agent == .cursor {
             var parts = ["Cursor"]
             if let usage = latestCursorOfficialUsage {
-                if let remaining = usage.remainingPercent {
-                    parts.append(percent(remaining))
+                if let compact = usage.compactUsageText {
+                    parts.append(compact)
                 } else {
                     parts.append(money(Double(usage.remainingCents) / 100))
                 }
@@ -558,13 +564,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(info("账号  \(authText)"))
         if CursorUsagePreference.officialUsageEnabled {
             if let usage = latestCursorOfficialUsage {
-                if let remaining = usage.remainingPercent {
+                if let remaining = usage.autoRemainingPercent {
+                    menu.addItem(info("Auto / Composer 剩余  \(percent(remaining))", emphasis: true))
+                }
+                if let remaining = usage.apiRemainingPercent {
+                    menu.addItem(info("API 用量剩余  \(percent(remaining))", emphasis: usage.autoRemainingPercent == nil))
+                }
+                if usage.autoRemainingPercent == nil,
+                   usage.apiRemainingPercent == nil,
+                   let remaining = usage.remainingPercent {
                     menu.addItem(info("官方用量剩余  \(percent(remaining))", emphasis: true))
                 }
-                menu.addItem(info("官方剩余额度  \(money(Double(usage.remainingCents) / 100))"))
-                menu.addItem(info(
-                    "本期已用  \(money(Double(usage.usedCents) / 100)) / \(money(Double(usage.limitCents) / 100))"
-                ))
+                if usage.limitCents > 0 {
+                    menu.addItem(info("官方剩余额度  \(money(Double(usage.remainingCents) / 100))"))
+                    menu.addItem(info(
+                        "本期已用  \(money(Double(usage.usedCents) / 100)) / \(money(Double(usage.limitCents) / 100))"
+                    ))
+                }
+                if let message = usage.displayMessage, !message.isEmpty {
+                    menu.addItem(info(message))
+                }
                 if let end = usage.billingCycleEnd {
                     menu.addItem(info("账期结束  \(resetFormatter.string(from: end))"))
                 }
@@ -652,7 +671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateWidget() {
-        CodexPulseWidgetStore.update(
+        AgentPulseWidgetStore.update(
             agent: agent,
             route: route,
             codeUsage: latestCodeUsage,

@@ -104,6 +104,12 @@ enum CursorLauncher {
         return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
+    static var isRunning: Bool {
+        bundleIdentifiers.contains { identifier in
+            !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty
+        }
+    }
+
     static func launch() async throws {
         guard let appURL = applicationURL() else {
             throw CursorIntegrationError.appNotFound
