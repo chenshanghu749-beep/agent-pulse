@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var latestCursorStatus = CursorStatus.unavailable
     private var latestCursorOfficialUsage: CursorOfficialUsageSnapshot?
     private var latestCursorProviderUsage: UsageResponse?
+    private var latestTraeProviderUsage: UsageResponse?
     private var cursorHooksNeedRestart = false
     private var latestError: String?
     private var lastUpdated: Date?
@@ -55,6 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if cursorHooksNeedRestart {
                     latestError = "Cursor 状态 Hooks 已更新，请重启 Cursor 使其生效。"
                 }
+            } catch {
+                latestError = error.localizedDescription
+            }
+        } else if agent == .trae {
+            do {
+                _ = try TraeIntegration.installHooks()
             } catch {
                 latestError = error.localizedDescription
             }
@@ -149,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         latestOfficialUsage = nil
         latestCursorOfficialUsage = nil
         latestCursorProviderUsage = nil
+        latestTraeProviderUsage = nil
         taskSnapshot = TaskActivitySnapshot(state: .ready, changedAt: nil)
         startStartupChase()
         updateStatusTitle()
@@ -250,6 +258,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             button.title = parts.joined(separator: " · ")
             button.toolTip = "Agent Pulse · Cursor"
+            return
+        }
+        if agent == .trae {
+            var parts = ["Trae"]
+            if let usage = latestTraeProviderUsage {
+                parts.append(money(usage.balance))
+            } else if let id = TraeUsagePreference.providerID,
+                      let provider = ProviderStore.provider(id: id) {
+                parts.append(compact(provider.name))
+            }
+            button.title = parts.joined(separator: " · ")
+            button.toolTip = "Agent Pulse · Trae"
             return
         }
         let title: String
@@ -384,6 +404,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 updateStatusTitle()
                 return
             }
+            if agent == .trae {
+                var errors: [String] = []
+                if TraeLauncher.applicationURL() == nil {
+                    errors.append("未找到 Trae.app")
+                }
+                latestTraeProviderUsage = nil
+                if let id = TraeUsagePreference.providerID,
+                   let provider = ProviderStore.provider(id: id),
+                   provider.isCodeAPI {
+                    if let key = CredentialStore.load(providerID: id), !key.isEmpty {
+                        do {
+                            latestTraeProviderUsage = try await CodeAPIClient.fetch(key: key)
+                        } catch {
+                            errors.append("\(provider.name)：\(error.localizedDescription)")
+                        }
+                    } else {
+                        errors.append("\(provider.name) 尚未配置 API Key")
+                    }
+                }
+                if !TraeIntegration.hooksInstalled() {
+                    errors.append("Trae 状态 Hooks 不完整，请在设置中重新应用。")
+                }
+                latestError = errors.isEmpty ? nil : errors.joined(separator: "；")
+                lastUpdated = Date()
+                updateStatusTitle()
+                return
+            }
             switch route {
             case let .provider(id):
                 guard let provider = ProviderStore.provider(id: id) else {
@@ -417,6 +464,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if agent == .cursor {
             addCursorMenu(to: mainMenu)
+        } else if agent == .trae {
+            addTraeMenu(to: mainMenu)
         } else {
             switch route {
             case let .provider(id):
@@ -451,6 +500,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let dashboardTitle: String
         if agent == .cursor {
             dashboardTitle = "打开 Cursor 用量页面"
+        } else if agent == .trae {
+            dashboardTitle = "打开 Trae"
         } else {
             switch route {
             case .official: dashboardTitle = "打开官方用量页面"
@@ -625,12 +676,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func addTraeMenu(to menu: NSMenu) {
+        menu.addItem(info("Trae", emphasis: true))
+        guard TraeLauncher.applicationURL() != nil else {
+            menu.addItem(info("未找到 Trae.app"))
+            return
+        }
+        if let id = TraeUsagePreference.providerID,
+           let provider = ProviderStore.provider(id: id) {
+            if let usage = latestTraeProviderUsage {
+                menu.addItem(info("\(provider.name) 余额  \(money(usage.balance))", emphasis: true))
+                menu.addItem(info("今日费用  \(money(usage.usage.today.actualCost))"))
+                menu.addItem(info("今日 Token  \(number(usage.usage.today.totalTokens))"))
+            } else {
+                menu.addItem(info("提供商  \(provider.name) · \(provider.model)"))
+            }
+        } else {
+            menu.addItem(info("提供商余额  未选择"))
+        }
+        menu.addItem(info("官方用量  请在 Trae 的 Usage 中查看"))
+        menu.addItem(.separator())
+        menu.addItem(info("状态 Hooks  \(TraeIntegration.hooksInstalled() ? "已启用" : "未启用")"))
+        if let diagnostic = TraeActivityReader.diagnostic() {
+            menu.addItem(info("最近事件  \(diagnostic)"))
+        } else {
+            menu.addItem(info("最近事件  暂无"))
+        }
+        menu.addItem(info("Hooks 配置实时加载，无需重启 Trae"))
+    }
+
     private func refreshTaskActivity() async {
         guard !isRefreshingTask else { return }
         isRefreshingTask = true
         let selectedAgent = agent
         let snapshot = await Task.detached(priority: .utility) {
-            selectedAgent == .cursor ? CursorActivityReader.read() : TaskActivityReader.read()
+            switch selectedAgent {
+            case .cursor: return CursorActivityReader.read()
+            case .trae: return TraeActivityReader.read()
+            case .codex: return TaskActivityReader.read()
+            }
         }.value
         let shouldPlayCompletionChase: Bool
         switch (taskSnapshot.state, snapshot.state) {
@@ -678,6 +762,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             officialUsage: latestOfficialUsage,
             cursorOfficialUsage: latestCursorOfficialUsage,
             cursorProviderUsage: latestCursorProviderUsage,
+            traeProviderUsage: latestTraeProviderUsage,
             task: taskSnapshot
         )
     }
@@ -707,6 +792,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.open(URL(string: "https://cursor.com/dashboard?tab=usage")!)
             return
         }
+        if agent == .trae {
+            Task { try? await TraeLauncher.launch() }
+            return
+        }
         switch route {
         case .official:
             NSWorkspace.shared.open(URL(string: "https://chatgpt.com/codex/settings/usage")!)
@@ -722,6 +811,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Task {
                 do {
                     try await CursorLauncher.launch()
+                } catch {
+                    presentLaunchWarning(error.localizedDescription)
+                }
+            }
+        } else if agent == .trae {
+            Task {
+                do {
+                    try await TraeLauncher.launch()
                 } catch {
                     presentLaunchWarning(error.localizedDescription)
                 }

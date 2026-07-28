@@ -48,6 +48,7 @@ enum AgentPulseWidgetStore {
         officialUsage: OfficialUsageSnapshot?,
         cursorOfficialUsage: CursorOfficialUsageSnapshot?,
         cursorProviderUsage: UsageResponse?,
+        traeProviderUsage: UsageResponse?,
         task: TaskActivitySnapshot
     ) {
         var routeName = "Codex · \(route.displayName)"
@@ -89,6 +90,26 @@ enum AgentPulseWidgetStore {
                 totalTokens = cursorProviderUsage.usage.today.totalTokens
             } else {
                 primaryValue = "Cursor"
+                primaryLabel = "当前 Agent"
+                detail = "状态 Hooks · 自动同步"
+            }
+        } else if agent == .trae {
+            routeName = "Trae"
+            modelName = "Trae Agent"
+            if let traeProviderUsage {
+                primaryValue = String(format: "$%.2f", traeProviderUsage.balance)
+                primaryLabel = "提供商余额"
+                detail = "今日费用 $\(String(format: "%.2f", traeProviderUsage.usage.today.actualCost))"
+                inputTokens = traeProviderUsage.usage.today.inputTokens
+                outputTokens = traeProviderUsage.usage.today.outputTokens
+                totalTokens = traeProviderUsage.usage.today.totalTokens
+            } else if let id = TraeUsagePreference.providerID,
+                      let provider = ProviderStore.provider(id: id) {
+                primaryValue = provider.name
+                primaryLabel = "当前提供商"
+                detail = "\(provider.model) · 状态 Hooks 已连接"
+            } else {
+                primaryValue = "Trae"
                 primaryLabel = "当前 Agent"
                 detail = "状态 Hooks · 自动同步"
             }

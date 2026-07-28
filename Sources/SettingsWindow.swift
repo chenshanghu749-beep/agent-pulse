@@ -97,6 +97,7 @@ final class SettingsWindowController: NSWindowController {
     private let routeProviderPopup = NSPopUpButton()
     private let cursorBalanceProviderPopup = NSPopUpButton()
     private let cursorOfficialUsageSwitch = NSSwitch()
+    private let traeBalanceProviderPopup = NSPopUpButton()
     private let providerPopup = NSPopUpButton()
     private let nameField = NSTextField()
     private let baseURLField = NSTextField()
@@ -108,6 +109,7 @@ final class SettingsWindowController: NSWindowController {
     private let themePopup = NSPopUpButton()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let cursorModelsButton = NSButton(title: "打开模型设置", target: nil, action: nil)
+    private let traeModelsButton = NSButton(title: "打开 Trae", target: nil, action: nil)
     private let confirmButton = NSButton(title: "应用并打开", target: nil, action: nil)
     private let currentVersionLabel = NSTextField(labelWithString: AppUpdateChecker.currentVersion)
     private let updateStatusLabel = NSTextField(wrappingLabelWithString: "尚未检查更新")
@@ -115,6 +117,7 @@ final class SettingsWindowController: NSWindowController {
     private let openProjectButton = NSButton(title: "打开项目主页", target: nil, action: nil)
     private weak var codexRouteCard: NSView?
     private weak var cursorRouteCard: NSView?
+    private weak var traeRouteCard: NSView?
 
     init(appDelegate: AppDelegate) {
         self.appDelegate = appDelegate
@@ -248,8 +251,9 @@ final class SettingsWindowController: NSWindowController {
     private func configureControls() {
         agentControl.target = self
         agentControl.action = #selector(agentChanged)
-        agentControl.setWidth(142, forSegment: 0)
-        agentControl.setWidth(142, forSegment: 1)
+        for index in AgentKind.allCases.indices {
+            agentControl.setWidth(112, forSegment: index)
+        }
         routeControl.target = self
         routeControl.action = #selector(routeChanged)
         routeControl.setWidth(142, forSegment: 0)
@@ -262,6 +266,9 @@ final class SettingsWindowController: NSWindowController {
         cursorBalanceProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
         cursorOfficialUsageSwitch.target = self
         cursorOfficialUsageSwitch.action = #selector(cursorOfficialUsageChanged)
+        traeBalanceProviderPopup.target = self
+        traeBalanceProviderPopup.action = #selector(traeBalanceProviderChanged)
+        traeBalanceProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdates)
         openProjectButton.target = self
@@ -283,6 +290,8 @@ final class SettingsWindowController: NSWindowController {
         testProviderButton.action = #selector(testProviderConnection)
         cursorModelsButton.target = self
         cursorModelsButton.action = #selector(openCursorModels)
+        traeModelsButton.target = self
+        traeModelsButton.action = #selector(openTraeModels)
 
         iconStylePopup.addItems(withTitles: StatusIconStyle.allCases.map(\.displayName))
         for (index, style) in StatusIconStyle.allCases.enumerated() {
@@ -335,6 +344,26 @@ final class SettingsWindowController: NSWindowController {
             detail: "选择 Agent Pulse 中已配置的提供商。CodeAPI 可显示余额，其他提供商显示名称与模型。",
             control: cursorBalanceProviderPopup
         )
+        let traeBalanceRow = settingRow(
+            title: "提供商余额",
+            detail: "选择 Agent Pulse 中已配置的提供商。CodeAPI 可显示余额，其他提供商显示名称与模型。",
+            control: traeBalanceProviderPopup
+        )
+        let traeOfficialUsageRow = settingRow(
+            title: "官方用量",
+            detail: "Trae 暂未提供可安全调用的公开用量接口，可在 Trae 右下角 Usage 中查看。",
+            control: NSTextField(labelWithString: "Trae 内查看")
+        )
+        let traeHooksRow = settingRow(
+            title: "任务状态",
+            detail: "通过 Trae Hooks 同步执行、工具等待和完成状态；配置实时加载，不需要重启 Trae。",
+            control: NSTextField(labelWithString: "自动同步")
+        )
+        let traeModelsRow = settingRow(
+            title: "Trae 模型",
+            detail: "模型和 API Key 继续由 Trae 官方设置管理，Agent Pulse 不读取或修改会话内容。",
+            control: traeModelsButton
+        )
         let codexCard = card([routeRow, separator(), providerRow, separator(), historyRow])
         let cursorCard = card([
             cursorOfficialUsageRow,
@@ -343,15 +372,26 @@ final class SettingsWindowController: NSWindowController {
             separator(),
             cursorRow
         ])
+        let traeCard = card([
+            traeBalanceRow,
+            separator(),
+            traeOfficialUsageRow,
+            separator(),
+            traeHooksRow,
+            separator(),
+            traeModelsRow
+        ])
         codexRouteCard = codexCard
         cursorRouteCard = cursorCard
+        traeRouteCard = traeCard
         return page(
             title: "路由",
             subtitle: "选择 Agent，以及它使用的模型来源。",
             cards: [
                 card([agentRow]),
                 codexCard,
-                cursorCard
+                cursorCard,
+                traeCard
             ]
         )
     }
@@ -601,6 +641,10 @@ final class SettingsWindowController: NSWindowController {
            let cursorProviderID = CursorUsagePreference.providerID,
            providers.contains(where: { $0.id == cursorProviderID }) {
             selectedProviderID = cursorProviderID
+        } else if selectedAgent == .trae,
+                  let traeProviderID = TraeUsagePreference.providerID,
+                  providers.contains(where: { $0.id == traeProviderID }) {
+            selectedProviderID = traeProviderID
         } else if case let .provider(id) = route {
             selectedProviderID = id
         } else {
@@ -641,6 +685,11 @@ final class SettingsWindowController: NSWindowController {
            providers.contains(where: { $0.id == id }) {
             selectedProviderID = id
             selectProvider(id, in: cursorBalanceProviderPopup)
+        } else if selectedAgent() == .trae,
+                  let id = TraeUsagePreference.providerID,
+                  providers.contains(where: { $0.id == id }) {
+            selectedProviderID = id
+            selectProvider(id, in: traeBalanceProviderPopup)
         }
         updateRouteFields()
         updateConfirmButtonTitle()
@@ -657,6 +706,14 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func cursorBalanceProviderChanged() {
         guard let id = selectedProviderID(from: cursorBalanceProviderPopup) else { return }
+        selectedProviderID = id
+        selectProvider(id, in: providerPopup)
+        loadSelectedProvider()
+        statusLabel.stringValue = ""
+    }
+
+    @objc private func traeBalanceProviderChanged() {
+        guard let id = selectedProviderID(from: traeBalanceProviderPopup) else { return }
         selectedProviderID = id
         selectProvider(id, in: providerPopup)
         loadSelectedProvider()
@@ -721,20 +778,27 @@ final class SettingsWindowController: NSWindowController {
     private func updateRouteFields() {
         let selectedAgent = selectedAgent()
         let isCodex = selectedAgent == .codex
+        let isCursor = selectedAgent == .cursor
+        let isTrae = selectedAgent == .trae
         let custom = routeControl.selectedSegment == 1
         codexRouteCard?.isHidden = !isCodex
-        cursorRouteCard?.isHidden = isCodex
+        cursorRouteCard?.isHidden = !isCursor
+        traeRouteCard?.isHidden = !isTrae
         routeControl.isEnabled = isCodex
         routeProviderPopup.isEnabled = isCodex && custom && !providers.isEmpty
-        cursorModelsButton.isEnabled = !isCodex
-        cursorBalanceProviderPopup.isEnabled = !isCodex && !providers.isEmpty
-        cursorOfficialUsageSwitch.isEnabled = !isCodex
+        cursorModelsButton.isEnabled = isCursor
+        cursorBalanceProviderPopup.isEnabled = isCursor && !providers.isEmpty
+        cursorOfficialUsageSwitch.isEnabled = isCursor
+        traeModelsButton.isEnabled = isTrae
+        traeBalanceProviderPopup.isEnabled = isTrae && !providers.isEmpty
         if isCodex {
             routeDescription.stringValue = custom
                 ? "第三方路由使用当前选中的提供商。应用后 Codex 会重新启动，但本地会话不会删除。"
                 : "官方路由使用 Codex 当前的 ChatGPT 登录状态；无需重复配置 API Key。"
-        } else {
+        } else if isCursor {
             routeDescription.stringValue = "Cursor 的模型与 BYOK Key 由 Cursor 官方设置管理；Agent Pulse 负责启动和状态同步。"
+        } else {
+            routeDescription.stringValue = "Trae 的模型与 API Key 由 Trae 官方设置管理；Agent Pulse 负责启动、余额和 Hooks 状态同步。"
         }
     }
 
@@ -751,21 +815,25 @@ final class SettingsWindowController: NSWindowController {
         providerPopup.removeAllItems()
         routeProviderPopup.removeAllItems()
         cursorBalanceProviderPopup.removeAllItems()
+        traeBalanceProviderPopup.removeAllItems()
         let titles = ProviderStore.popupTitles(for: providers)
         for (provider, title) in zip(providers, titles) {
             addProviderItem(title: title, providerID: provider.id, to: providerPopup)
             addProviderItem(title: title, providerID: provider.id, to: routeProviderPopup)
             addProviderItem(title: title, providerID: provider.id, to: cursorBalanceProviderPopup)
+            addProviderItem(title: title, providerID: provider.id, to: traeBalanceProviderPopup)
         }
         if let id = selectedProviderID, providers.contains(where: { $0.id == id }) {
             selectProvider(id, in: providerPopup)
             selectProvider(id, in: routeProviderPopup)
             selectProvider(id, in: cursorBalanceProviderPopup)
+            selectProvider(id, in: traeBalanceProviderPopup)
         } else if !providers.isEmpty {
             selectedProviderID = providers[0].id
             selectProvider(providers[0].id, in: providerPopup)
             selectProvider(providers[0].id, in: routeProviderPopup)
             selectProvider(providers[0].id, in: cursorBalanceProviderPopup)
+            selectProvider(providers[0].id, in: traeBalanceProviderPopup)
         }
         updateRouteFields()
     }
@@ -847,6 +915,9 @@ final class SettingsWindowController: NSWindowController {
             selectedProviderID = providers.indices.contains(index) ? providers[index].id : providers.last?.id
             if CursorUsagePreference.providerID == id {
                 CursorUsagePreference.providerID = selectedProviderID
+            }
+            if TraeUsagePreference.providerID == id {
+                TraeUsagePreference.providerID = selectedProviderID
             }
             try ProviderStore.saveProviders(providers, selectedProviderID: selectedProviderID)
             reloadProviderPopups()
@@ -951,9 +1022,24 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
+    @objc private func openTraeModels() {
+        Task {
+            do {
+                try await TraeLauncher.openModelSettings()
+                showSuccess("已打开 Trae，请在设置中管理模型。")
+            } catch {
+                showError(error.localizedDescription)
+            }
+        }
+    }
+
     @objc private func confirmSelection() {
         if selectedAgent() == .cursor {
             confirmCursorSelection()
+            return
+        }
+        if selectedAgent() == .trae {
+            confirmTraeSelection()
             return
         }
         confirmButton.isEnabled = false
@@ -1059,6 +1145,33 @@ final class SettingsWindowController: NSWindowController {
                 showSuccess(restartRequired
                     ? "Cursor 已连接；Hooks 将在下次手动重启 Cursor 后生效。"
                     : "Cursor 已连接，用量与状态同步已启用。")
+                confirmButton.title = "连接成功"
+                window?.close()
+            } catch {
+                showError(error.localizedDescription)
+                confirmButton.isEnabled = true
+                updateConfirmButtonTitle()
+            }
+        }
+    }
+
+    private func confirmTraeSelection() {
+        confirmButton.isEnabled = false
+        confirmButton.title = "正在配置…"
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.stringValue = "正在安装 Trae 状态 Hooks…"
+
+        Task {
+            do {
+                _ = try TraeIntegration.installHooks()
+                TraeUsagePreference.providerID = selectedProviderID(
+                    from: traeBalanceProviderPopup
+                )
+                AgentPreference.selected = .trae
+                appDelegate?.agentDidChange(to: .trae)
+                statusLabel.stringValue = "正在打开 Trae…"
+                try await TraeLauncher.launch()
+                showSuccess("Trae 已连接，余额与任务状态同步已启用。")
                 confirmButton.title = "连接成功"
                 window?.close()
             } catch {

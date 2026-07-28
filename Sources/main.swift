@@ -603,6 +603,14 @@ if CommandLine.arguments.contains("--login-status-test") {
         print("CURSOR_HOOKS_ERROR \(error.localizedDescription)")
         exit(EXIT_FAILURE)
     }
+} else if CommandLine.arguments.contains("--install-trae-hooks") {
+    do {
+        try TraeIntegration.installHooks()
+        print("TRAE_HOOKS_OK \(TraeIntegration.hooksURL.path)")
+    } catch {
+        print("TRAE_HOOKS_ERROR \(error.localizedDescription)")
+        exit(EXIT_FAILURE)
+    }
 } else if CommandLine.arguments.contains("--self-test") {
     let sample = """
     model = "gpt-5.6-sol"
@@ -950,6 +958,72 @@ if CommandLine.arguments.contains("--login-status-test") {
     try! Data("{\"state\":\"ready\",\"timestamp\":\(cursorTimestamp)}".utf8)
         .write(to: cursorState)
     precondition(CursorActivityReader.read(stateURL: cursorState).state == .ready)
+
+    let traeTestRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("agent-pulse-trae-test-\(UUID().uuidString)", isDirectory: true)
+    let traeConfig = traeTestRoot.appendingPathComponent(".trae", isDirectory: true)
+    let traeSupport = traeTestRoot.appendingPathComponent("support", isDirectory: true)
+    try! FileManager.default.createDirectory(at: traeConfig, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: traeTestRoot) }
+    let existingTraeHooks = """
+    {
+      "version": 1,
+      "hooks": {
+        "PreToolUse": [
+          {
+            "matcher": "RunCommand",
+            "hooks": [{"type": "command", "command": "/usr/bin/true", "timeout": 3}]
+          }
+        ]
+      }
+    }
+    """
+    try! Data(existingTraeHooks.utf8).write(to: traeConfig.appendingPathComponent("hooks.json"))
+    let firstTraeHooksInstallChanged = try! TraeIntegration.installHooks(
+        traeDirectory: traeConfig,
+        supportDirectory: traeSupport
+    )
+    let secondTraeHooksInstallChanged = try! TraeIntegration.installHooks(
+        traeDirectory: traeConfig,
+        supportDirectory: traeSupport
+    )
+    precondition(firstTraeHooksInstallChanged)
+    precondition(!secondTraeHooksInstallChanged)
+    let installedTraeHooksData = try! Data(contentsOf: traeConfig.appendingPathComponent("hooks.json"))
+    let installedTraeRoot = try! JSONSerialization.jsonObject(
+        with: installedTraeHooksData
+    ) as! [String: Any]
+    let installedTraeHooks = installedTraeRoot["hooks"] as! [String: Any]
+    let traePreToolGroups = installedTraeHooks["PreToolUse"] as! [[String: Any]]
+    precondition(traePreToolGroups.contains { group in
+        let commands = group["hooks"] as? [[String: Any]] ?? []
+        return commands.contains { $0["command"] as? String == "/usr/bin/true" }
+    })
+    for event in ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"] {
+        precondition(installedTraeHooks[event] != nil)
+    }
+    let pulseTraeHookCount = installedTraeHooks.values.reduce(0) { count, value in
+        let groups = value as? [[String: Any]] ?? []
+        return count + groups.reduce(0) { innerCount, group in
+            let commands = group["hooks"] as? [[String: Any]] ?? []
+            return innerCount + commands.filter {
+                ($0["command"] as? String)?.contains("trae-hook.sh") == true
+            }.count
+        }
+    }
+    precondition(pulseTraeHookCount == 5)
+
+    let traeState = traeTestRoot.appendingPathComponent("trae-state.json")
+    let traeTimestamp = Date().timeIntervalSince1970
+    try! Data("{\"state\":\"running\",\"timestamp\":\(traeTimestamp)}".utf8)
+        .write(to: traeState)
+    precondition(TraeActivityReader.read(stateURL: traeState).state == .running(1))
+    try! Data("{\"state\":\"waiting\",\"timestamp\":\(traeTimestamp)}".utf8)
+        .write(to: traeState)
+    precondition(TraeActivityReader.read(stateURL: traeState).state == .waiting(1))
+    try! Data("{\"state\":\"ready\",\"timestamp\":\(traeTimestamp)}".utf8)
+        .write(to: traeState)
+    precondition(TraeActivityReader.read(stateURL: traeState).state == .ready)
 
     let cursorUsageFixture = Data("""
     {
