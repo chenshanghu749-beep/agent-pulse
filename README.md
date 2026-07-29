@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-2.8.0-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-2.8.1-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -41,6 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 | 用量展示 | 查看 OpenAI/Cursor 官方用量及 Cursor/Trae 对应的 CodeAPI 提供商余额 |
 | 任务状态 | 支持 Codex 日志、Cursor Hooks 与 Trae Hooks；红色执行、黄色工具、绿色完成 |
 | 会话保持 | 不改写 Codex、Cursor 或 Trae 的会话数据库 |
+| 旧会话兼容 | 首次启动检测旧第三方会话，经用户确认后创建 OpenAI 兼容副本，并保留完整备份 |
 
 支持 Responses API，并可在本机将 DeepSeek 等 Chat Completions 接口转换为 Codex 所需协议。GPT‑5.6 第三方路由会自动应用 Responses Lite 兼容配置。提供商配置支持连接测试，可在启用前校验 Base URL、API Key、模型与协议。
 
@@ -61,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-2.8.0.dmg`](dist/Agent-Pulse-2.8.0.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-2.8.1.dmg`](dist/Agent-Pulse-2.8.1.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -75,7 +76,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.8.0.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.8.1.dmg`。
 
 ## 隐私与安全
 
@@ -85,6 +86,7 @@ chmod +x build.sh package.sh
 - Cursor 官方用量需用户明确授权；登录令牌仅在请求期间保留于内存，不会复制或持久化。
 - Cursor Hooks 只记录执行、工具和完成状态，不记录提示词、回复或会话内容。
 - Trae Hooks 同样只写入红黄绿状态与事件时间，不读取提示词、回复或会话内容。
+- 旧会话迁移只在用户确认后执行；源会话保持不变，数据库、配置和源 JSONL 会先保存到本地备份目录。
 - 进入第三方路由前会备份官方登录，切回官方时自动恢复并隔离第三方 API Key。
 - 应用不使用 macOS 钥匙串，不会反复触发钥匙串授权弹窗。
 
@@ -105,4 +107,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`2.8.0`
+当前版本：`2.8.1`

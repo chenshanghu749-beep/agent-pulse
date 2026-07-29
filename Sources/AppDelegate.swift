@@ -98,8 +98,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             await refreshUsage()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            self?.settings.present()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.offerLegacySessionMigrationIfNeeded()
+            self.settings.present()
+        }
+    }
+
+    private func offerLegacySessionMigrationIfNeeded() async {
+        guard LegacySessionMigration.shouldPrompt() else { return }
+        let scan: LegacySessionMigrationScan?
+        do {
+            scan = try await Task.detached(priority: .utility) {
+                try LegacySessionMigration.scan()
+            }.value
+        } catch {
+            latestError = error.localizedDescription
+            return
+        }
+        guard let scan else {
+            LegacySessionMigration.markPromptHandled()
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let sizeFormatter = ByteCountFormatter()
+        sizeFormatter.countStyle = .file
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "发现旧版第三方会话"
+        alert.informativeText = """
+        检测到 \(scan.providerCount) 个第三方配置、\(scan.sessionCount) 条旧会话（\(sizeFormatter.string(fromByteCount: scan.totalBytes))）。
+
+        新版 Codex 使用统一的 OpenAI 会话标识。Agent Pulse 可以为这些会话创建一份兼容副本，让官方和第三方路由都能看到。原会话不会修改，并会额外备份数据库和源文件。
+        """
+        alert.addButton(withTitle: "复制并保留备份")
+        alert.addButton(withTitle: "暂不处理")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            LegacySessionMigration.markPromptHandled()
+            return
+        }
+
+        let codexWasRunning = CodexLauncher.isRunning
+        do {
+            if codexWasRunning {
+                try await CodexLauncher.terminate()
+            }
+            let result = try await Task.detached(priority: .userInitiated) {
+                try LegacySessionMigration.migrate(scan)
+            }.value
+            LegacySessionMigration.markPromptHandled()
+            if codexWasRunning {
+                try await CodexLauncher.launch()
+            }
+            let success = NSAlert()
+            success.alertStyle = .informational
+            success.messageText = "旧会话兼容副本已创建"
+            success.informativeText = """
+            已复制 \(result.copiedSessions) 条会话到统一列表，原会话保持不变。
+
+            备份位置：
+            \(result.backupDirectory.path)
+            """
+            success.addButton(withTitle: "完成")
+            success.runModal()
+        } catch {
+            if codexWasRunning, !CodexLauncher.isRunning {
+                try? await CodexLauncher.launch()
+            }
+            let failure = NSAlert()
+            failure.alertStyle = .warning
+            failure.messageText = "旧会话复制未完成"
+            failure.informativeText = "\(error.localizedDescription)\n\n原会话未修改，下次启动时可以重新尝试。"
+            failure.addButton(withTitle: "知道了")
+            failure.runModal()
         }
     }
 

@@ -904,6 +904,176 @@ if CommandLine.arguments.contains("--login-status-test") {
     try! Data((event("task_started") + event("turn_aborted")).utf8).write(to: abortedSession)
     precondition(TaskActivityReader.read(root: taskRoot).state == .ready)
 
+    let migrationRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("agent-pulse-session-migration-\(UUID().uuidString)", isDirectory: true)
+    let migrationSessions = migrationRoot
+        .appendingPathComponent("sessions/2026/07/29", isDirectory: true)
+    try! FileManager.default.createDirectory(
+        at: migrationSessions,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: migrationRoot) }
+    let migrationConfig = """
+    model_provider = "openai"
+
+    [model_providers.codeapi]
+    name = "CodeAPI"
+    base_url = "https://codeapi.nexita.net/v1"
+
+    [model_providers.codeapi_status_custom]
+    name = "CodeAPI Legacy"
+    base_url = "https://codeapi.nexita.net/v1"
+
+    [model_providers.deepseek]
+    name = "DeepSeek"
+    base_url = "https://api.deepseek.com/v1"
+    """
+    try! Data(migrationConfig.utf8).write(
+        to: migrationRoot.appendingPathComponent("config.toml")
+    )
+    let legacyCodeAPIID = "11111111-1111-4111-8111-111111111111"
+    let legacyDeepSeekID = "22222222-2222-4222-8222-222222222222"
+    let currentOpenAIID = "33333333-3333-4333-8333-333333333333"
+    func migrationFixtureURL(_ id: String) -> URL {
+        migrationSessions.appendingPathComponent("rollout-2026-07-29T10-00-00-\(id).jsonl")
+    }
+    func migrationFixtureData(id: String, provider: String) -> Data {
+        Data("""
+        {"timestamp":"2026-07-29T02:00:00Z","type":"session_meta","payload":{"id":"\(id)","session_id":"\(id)","model_provider":"\(provider)","cwd":"/tmp"}}
+        {"timestamp":"2026-07-29T02:00:01Z","type":"event_msg","payload":{"type":"task_complete"}}
+
+        """.utf8)
+    }
+    try! migrationFixtureData(id: legacyCodeAPIID, provider: "codeapi")
+        .write(to: migrationFixtureURL(legacyCodeAPIID))
+    try! migrationFixtureData(id: legacyDeepSeekID, provider: "deepseek")
+        .write(to: migrationFixtureURL(legacyDeepSeekID))
+    try! migrationFixtureData(id: currentOpenAIID, provider: "openai")
+        .write(to: migrationFixtureURL(currentOpenAIID))
+    let migrationDatabase = migrationRoot.appendingPathComponent("state_5.sqlite")
+    func runMigrationFixtureSQLite(_ sql: String) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = [migrationDatabase.path, sql]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try! process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        precondition(process.terminationStatus == 0)
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+    func sqliteFixtureLiteral(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "''") + "'"
+    }
+    let migrationFixtureSQL = """
+    CREATE TABLE threads (
+      id TEXT PRIMARY KEY,
+      rollout_path TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      model_provider TEXT NOT NULL,
+      title TEXT NOT NULL
+    );
+    CREATE TABLE thread_dynamic_tools (
+      thread_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      input_schema TEXT NOT NULL,
+      defer_loading INTEGER NOT NULL DEFAULT 0,
+      namespace TEXT,
+      PRIMARY KEY(thread_id, position),
+      FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
+    );
+    CREATE TABLE thread_spawn_edges (
+      parent_thread_id TEXT NOT NULL,
+      child_thread_id TEXT NOT NULL PRIMARY KEY,
+      status TEXT NOT NULL
+    );
+    INSERT INTO threads VALUES (
+      \(sqliteFixtureLiteral(legacyCodeAPIID)),
+      \(sqliteFixtureLiteral(migrationFixtureURL(legacyCodeAPIID).path)),
+      1, 3, 'codeapi', 'CodeAPI legacy'
+    );
+    INSERT INTO threads VALUES (
+      \(sqliteFixtureLiteral(legacyDeepSeekID)),
+      \(sqliteFixtureLiteral(migrationFixtureURL(legacyDeepSeekID).path)),
+      1, 2, 'deepseek', 'DeepSeek legacy'
+    );
+    INSERT INTO threads VALUES (
+      \(sqliteFixtureLiteral(currentOpenAIID)),
+      \(sqliteFixtureLiteral(migrationFixtureURL(currentOpenAIID).path)),
+      1, 1, 'openai', 'OpenAI current'
+    );
+    INSERT INTO thread_dynamic_tools VALUES (
+      \(sqliteFixtureLiteral(legacyCodeAPIID)),
+      0, 'fixture_tool', 'Fixture', '{}', 0, 'fixture'
+    );
+    INSERT INTO thread_spawn_edges VALUES (
+      \(sqliteFixtureLiteral(legacyCodeAPIID)),
+      \(sqliteFixtureLiteral(legacyDeepSeekID)),
+      'completed'
+    );
+    """
+    _ = runMigrationFixtureSQLite(migrationFixtureSQL)
+    let migrationScan = try! LegacySessionMigration.scan(codexHome: migrationRoot)
+    precondition(migrationScan?.providerCount == 2)
+    precondition(migrationScan?.sessionCount == 2)
+    let migrationResult = try! LegacySessionMigration.migrate(
+        migrationScan!,
+        codexHome: migrationRoot
+    )
+    precondition(migrationResult.copiedSessions == 2)
+    precondition(FileManager.default.fileExists(
+        atPath: migrationResult.backupDirectory
+            .appendingPathComponent("state_5.sqlite").path
+    ))
+    let migrationCounts = runMigrationFixtureSQLite(
+        "SELECT model_provider || ':' || COUNT(*) FROM threads GROUP BY model_provider ORDER BY model_provider;"
+    )
+    precondition(migrationCounts.contains("codeapi:1"))
+    precondition(migrationCounts.contains("deepseek:1"))
+    precondition(migrationCounts.contains("openai:3"))
+    let copiedDynamicTools = runMigrationFixtureSQLite(
+        "SELECT COUNT(*) FROM thread_dynamic_tools WHERE thread_id != \(sqliteFixtureLiteral(legacyCodeAPIID));"
+    )
+    precondition(copiedDynamicTools.trimmingCharacters(in: .whitespacesAndNewlines) == "1")
+    let copiedSpawnEdges = runMigrationFixtureSQLite(
+        """
+        SELECT COUNT(*) FROM thread_spawn_edges edge
+        JOIN threads parent ON parent.id = edge.parent_thread_id
+        JOIN threads child ON child.id = edge.child_thread_id
+        WHERE parent.model_provider = 'openai' AND child.model_provider = 'openai';
+        """
+    )
+    precondition(copiedSpawnEdges.trimmingCharacters(in: .whitespacesAndNewlines) == "1")
+    let migrationReportURL = migrationRoot
+        .appendingPathComponent("agent-pulse/legacy-session-migration-v1.json")
+    let migrationReportData = try! Data(contentsOf: migrationReportURL)
+    let migrationReport = try! JSONSerialization.jsonObject(
+        with: migrationReportData
+    ) as! [String: Any]
+    let migrationCopies = migrationReport["copies"] as! [[String: Any]]
+    precondition(migrationCopies.count == 2)
+    for copy in migrationCopies {
+        let copiedID = copy["copiedID"] as! String
+        let copiedPath = copy["copiedPath"] as! String
+        let copiedFirstLine = try! String(
+            contentsOf: URL(fileURLWithPath: copiedPath),
+            encoding: .utf8
+        ).components(separatedBy: .newlines)[0]
+        let copiedMetadata = try! JSONSerialization.jsonObject(
+            with: Data(copiedFirstLine.utf8)
+        ) as! [String: Any]
+        let copiedPayload = copiedMetadata["payload"] as! [String: Any]
+        precondition(copiedPayload["id"] as? String == copiedID)
+        precondition(copiedPayload["session_id"] as? String == copiedID)
+        precondition(copiedPayload["model_provider"] as? String == "openai")
+    }
+    precondition(try! LegacySessionMigration.scan(codexHome: migrationRoot) == nil)
+
     let cursorTestRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("agent-pulse-cursor-test-\(UUID().uuidString)", isDirectory: true)
     let cursorConfig = cursorTestRoot.appendingPathComponent(".cursor", isDirectory: true)

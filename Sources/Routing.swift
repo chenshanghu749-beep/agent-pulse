@@ -425,6 +425,10 @@ enum RouteConfigManager {
 enum CodexLauncher {
     nonisolated static let bundleIdentifier = "com.openai.codex"
 
+    static var isRunning: Bool {
+        !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty
+    }
+
     static func terminate() async throws {
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
         for app in running { app.terminate() }
