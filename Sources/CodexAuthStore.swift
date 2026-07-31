@@ -125,6 +125,16 @@ enum CodexAuthStore {
         return .keepCurrent
     }
 
+    static func providerAuthNeedsRepair(for route: RouteChoice) -> Bool {
+        guard case let .provider(id) = route else { return false }
+        guard let key = CredentialStore.load(providerID: id) else { return true }
+        guard let data = try? Data(contentsOf: authURL),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return true
+        }
+        return nonemptyString(object["OPENAI_API_KEY"]) != key
+    }
+
     private static func prepareOfficialAuth() throws -> CodexAuthPreparation {
         let currentData = try readIfPresent(authURL)
         let backupData = try readIfPresent(officialBackupURL)

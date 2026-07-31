@@ -63,6 +63,50 @@ enum RouteConfigManager {
         )
     }
 
+    static func needsUpgradeReconciliation() -> Bool {
+        guard let content = try? String(contentsOf: configURL, encoding: .utf8) else {
+            return false
+        }
+        let profiles = ProviderStore.providers()
+        let selectedProviderID = ProviderStore.selectedProviderID()
+        return needsUpgradeReconciliation(
+            in: content,
+            profiles: profiles,
+            selectedProviderID: selectedProviderID
+        )
+    }
+
+    static func needsUpgradeReconciliation(
+        in content: String,
+        profiles: [ProviderProfile],
+        selectedProviderID: String?
+    ) -> Bool {
+        guard containsManagedBlock(content) else { return false }
+        let route = detectedRoute(
+            in: content,
+            profiles: profiles,
+            selectedProviderID: selectedProviderID
+        )
+        let legacyCredential = content.contains("command = \"/usr/bin/security\"")
+            || content.contains(CredentialStore.legacyDirectoryURL.path)
+            || content.contains(legacyBeginMarker)
+        var requiredIDs = profiles.map { codexProviderID(for: $0.id) }
+        if selectedProviderID != nil { requiredIDs.append(legacyManagedProviderID) }
+        if profiles.contains(where: { $0.id == "codeapi" || $0.isCodeAPI }) {
+            requiredIDs.append("codeapi")
+        }
+        let missingManagedProvider = requiredIDs.contains {
+            !content.contains("[model_providers.\($0)]")
+        }
+        let legacyProviderRoute: Bool
+        if case .provider = route {
+            legacyProviderRoute = topLevelProvider(in: content)?.lowercased() != "openai"
+        } else {
+            legacyProviderRoute = false
+        }
+        return legacyCredential || missingManagedProvider || legacyProviderRoute
+    }
+
     static func detectedRoute(
         in content: String,
         profiles: [ProviderProfile],

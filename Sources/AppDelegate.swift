@@ -43,8 +43,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         WidgetRegistration.ensureRegistered()
 
         do {
-            _ = try RouteConfigManager.migrateLegacyCredentialCommandIfNeeded()
-            _ = try RouteConfigManager.reconcileManagedProvidersIfNeeded()
+            let startupRoute = RouteConfigManager.currentRoute()
+            _ = try RouteUpgradeCoordinator.reconcileIfNeeded(
+                needsReconciliation: {
+                    RouteConfigManager.needsUpgradeReconciliation()
+                        || CodexAuthStore.providerAuthNeedsRepair(for: startupRoute)
+                },
+                currentRoute: { startupRoute },
+                snapshotAuth: { try CodexAuthStore.snapshot() },
+                prepareAuth: { _ = try CodexAuthStore.prepareForSwitch(to: $0) },
+                restoreAuth: { try CodexAuthStore.restore($0) },
+                applyConfig: { try RouteConfigManager.apply($0) }
+            )
         } catch {
             latestError = error.localizedDescription
         }

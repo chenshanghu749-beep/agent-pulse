@@ -767,6 +767,38 @@ if CommandLine.arguments.contains("--login-status-test") {
         profiles: [provider],
         selectedProviderID: provider.id
     ) == .official)
+    let legacyNamedProviderConfig = """
+    model_provider = "codeapi_status_provider_test-provider"
+    model = "custom-model"
+
+    \(RouteConfigManager.beginMarker)
+
+    [model_providers.codeapi_status_provider_test-provider]
+    name = "Test Provider"
+    base_url = "https://api.example.com/v1"
+    wire_api = "responses"
+
+    [model_providers.codeapi_status_provider_test-provider.auth]
+    command = "/bin/cat"
+    args = ["/tmp/test-provider.key"]
+
+    [model_providers.codeapi_status_custom]
+    name = "Test Provider"
+    base_url = "https://api.example.com/v1"
+    wire_api = "responses"
+
+    \(RouteConfigManager.endMarker)
+    """
+    precondition(RouteConfigManager.needsUpgradeReconciliation(
+        in: legacyNamedProviderConfig,
+        profiles: [provider],
+        selectedProviderID: provider.id
+    ))
+    precondition(!RouteConfigManager.needsUpgradeReconciliation(
+        in: custom,
+        profiles: [provider],
+        selectedProviderID: provider.id
+    ))
 
     let catalogFixture = try! JSONSerialization.data(withJSONObject: [
         "models": [
@@ -836,6 +868,54 @@ if CommandLine.arguments.contains("--login-status-test") {
         "Not logged in",
         terminationStatus: 1
     ))
+
+    var upgradeEvents: [String] = []
+    let upgradeChanged = try! RouteUpgradeCoordinator.reconcileIfNeeded(
+        needsReconciliation: { true },
+        currentRoute: { .provider(provider.id) },
+        snapshotAuth: {
+            upgradeEvents.append("snapshot-auth")
+            return "auth-before-upgrade"
+        },
+        prepareAuth: { route in
+            precondition(route == .provider(provider.id))
+            upgradeEvents.append("prepare-auth")
+        },
+        restoreAuth: { _ in upgradeEvents.append("restore-auth") },
+        applyConfig: { route in
+            precondition(route == .provider(provider.id))
+            upgradeEvents.append("apply-config")
+        }
+    )
+    precondition(upgradeChanged)
+    precondition(upgradeEvents == ["snapshot-auth", "prepare-auth", "apply-config"])
+
+    enum UpgradeTestError: Error { case cannotPrepareAuth }
+    upgradeEvents.removeAll()
+    do {
+        _ = try RouteUpgradeCoordinator.reconcileIfNeeded(
+            needsReconciliation: { true },
+            currentRoute: { .provider(provider.id) },
+            snapshotAuth: {
+                upgradeEvents.append("snapshot-auth")
+                return "auth-before-upgrade"
+            },
+            prepareAuth: { _ in
+                upgradeEvents.append("prepare-auth")
+                throw UpgradeTestError.cannotPrepareAuth
+            },
+            restoreAuth: { snapshot in
+                precondition(snapshot == "auth-before-upgrade")
+                upgradeEvents.append("restore-auth")
+            },
+            applyConfig: { _ in upgradeEvents.append("apply-config") }
+        )
+        preconditionFailure("Expected provider authentication migration to fail")
+    } catch UpgradeTestError.cannotPrepareAuth {
+        precondition(upgradeEvents == ["snapshot-auth", "prepare-auth", "restore-auth"])
+    } catch {
+        preconditionFailure("Unexpected upgrade error: \(error)")
+    }
 
     for style in StatusIconStyle.allCases {
         for signal in TrafficSignal.allCases {
