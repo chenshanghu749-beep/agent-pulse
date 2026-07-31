@@ -12,6 +12,8 @@ struct TaskActivitySnapshot: Sendable {
 }
 
 enum TaskActivityReader {
+    private static let abandonedSessionInterval: TimeInterval = 30 * 60
+
     private struct FileState {
         var state: TaskRunState
         var timestamp: Date
@@ -31,7 +33,10 @@ enum TaskActivityReader {
     private static let cacheLock = NSLock()
     private static var cache: [String: CacheEntry] = [:]
 
-    static func read(root customRoot: URL? = nil) -> TaskActivitySnapshot {
+    static func read(
+        root customRoot: URL? = nil,
+        now: Date = Date()
+    ) -> TaskActivitySnapshot {
         let root = customRoot ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/sessions", isDirectory: true)
         guard let enumerator = FileManager.default.enumerator(
@@ -54,7 +59,11 @@ enum TaskActivityReader {
             .sorted { $0.1 > $1.1 }
             .prefix(40)
             .compactMap { readState(from: $0.0, fallbackDate: $0.1) }
-        let states = results.map(\.fileState)
+        let activeResults = results.filter {
+            $0.fileState.state == .ready
+                || now.timeIntervalSince($0.fileState.timestamp) <= abandonedSessionInterval
+        }
+        let states = activeResults.map(\.fileState)
 
         let waiting = states.filter {
             if case .waiting = $0.state { return true }
@@ -64,7 +73,7 @@ enum TaskActivityReader {
             return TaskActivitySnapshot(state: .waiting(waiting.count), changedAt: waiting.map(\.timestamp).max())
         }
 
-        let recentToolActivity = results.filter {
+        let recentToolActivity = activeResults.filter {
             $0.sawToolCall && $0.fileState.state != .ready
         }
         if !recentToolActivity.isEmpty {
@@ -127,6 +136,10 @@ enum TaskActivityReader {
                   let type = payload["type"] as? String else { continue }
 
             let timestamp = (object["timestamp"] as? String).flatMap(parseDate) ?? fallbackDate
+            if var state = latest, state.state != .ready, timestamp > state.timestamp {
+                state.timestamp = timestamp
+                latest = state
+            }
             switch object["type"] as? String {
             case "event_msg":
                 switch type {

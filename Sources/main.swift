@@ -896,6 +896,18 @@ if CommandLine.arguments.contains("--login-status-test") {
     try! Data((event("task_started") + event("turn_aborted")).utf8).write(to: abortedSession)
     precondition(TaskActivityReader.read(root: taskRoot).state == .ready)
 
+    let staleFormatter = ISO8601DateFormatter()
+    staleFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let staleTimestamp = staleFormatter.string(from: Date().addingTimeInterval(-2 * 60 * 60))
+    let staleSession = taskRoot.appendingPathComponent("stale-tool-call.jsonl")
+    let staleEvents = """
+    {"timestamp":"\(staleTimestamp)","type":"event_msg","payload":{"type":"task_started"}}
+    {"timestamp":"\(staleTimestamp)","type":"response_item","payload":{"type":"custom_tool_call"}}
+
+    """
+    try! Data(staleEvents.utf8).write(to: staleSession)
+    precondition(TaskActivityReader.read(root: taskRoot).state == .ready)
+
     let migrationRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("agent-pulse-session-migration-\(UUID().uuidString)", isDirectory: true)
     let migrationSessions = migrationRoot
