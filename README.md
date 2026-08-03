@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-2.8.1-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-2.8.2-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -62,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-2.8.1.dmg`](dist/Agent-Pulse-2.8.1.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-2.8.2.dmg`](dist/Agent-Pulse-2.8.2.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -76,7 +76,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.8.1.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.8.2.dmg`。
 
 ## 隐私与安全
 
@@ -106,4 +106,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`2.8.1`
+当前版本：`2.8.2`

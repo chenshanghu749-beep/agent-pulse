@@ -1,6 +1,19 @@
 import AppKit
 import Foundation
 
+struct DashboardSnapshot {
+    let agentName: String
+    let routeName: String
+    let taskStatus: String
+    let taskSignal: TrafficSignal
+    let usageLabel: String
+    let usageValue: String
+    let usageDetail: String
+    let updatedText: String
+    let version: String
+    let message: String?
+}
+
 private final class StatusIconOverlayView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
@@ -243,6 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStatusTitle()
         rebuildMainMenu()
         updateWidget()
+        settings.refreshDashboard()
         Task { await refreshUsage() }
     }
 
@@ -259,6 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStatusTitle()
         rebuildMainMenu()
         updateWidget()
+        settings.refreshDashboard()
         Task {
             await refreshTaskActivity()
             await refreshUsage()
@@ -570,6 +585,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    func dashboardSnapshot() -> DashboardSnapshot {
+        let taskSignal: TrafficSignal
+        switch taskSnapshot.state {
+        case .running: taskSignal = .red
+        case .waiting: taskSignal = .yellow
+        case .ready: taskSignal = .green
+        }
+
+        var routeName = route.displayName
+        var usageLabel = "用量"
+        var usageValue = "—"
+        var usageDetail = "正在等待数据"
+
+        if agent == .cursor {
+            routeName = "Cursor 官方"
+            if CursorUsagePreference.officialUsageEnabled {
+                usageLabel = "官方用量剩余"
+                if let usage = latestCursorOfficialUsage {
+                    usageValue = usage.compactUsageText ?? usage.remainingPercent.map(percent) ?? "—"
+                    if usage.limitCents > 0 {
+                        usageDetail = "本期已用 \(money(Double(usage.usedCents) / 100)) / \(money(Double(usage.limitCents) / 100))"
+                    } else {
+                        usageDetail = usage.displayMessage ?? "Cursor 当前账期"
+                    }
+                } else {
+                    usageDetail = "尚未读取到 Cursor 官方用量"
+                }
+            } else if let id = CursorUsagePreference.providerID,
+                      let provider = ProviderStore.provider(id: id) {
+                routeName = provider.name
+                if let usage = latestCursorProviderUsage {
+                    usageLabel = "提供商余额"
+                    usageValue = money(usage.balance)
+                    usageDetail = "今日费用 \(money(usage.usage.today.actualCost)) · \(number(usage.usage.today.totalTokens)) Token"
+                } else {
+                    usageLabel = "当前模型"
+                    usageValue = provider.model
+                    usageDetail = provider.name
+                }
+            } else {
+                usageDetail = "Cursor 官方用量已关闭"
+            }
+        } else {
+            switch route {
+            case .official:
+                usageLabel = "官方用量剩余"
+                if latestOfficialUsage?.isLoggedIn == false {
+                    usageValue = "未登录"
+                    usageDetail = "请先登录 OpenAI 官方账号"
+                } else if let primary = latestOfficialUsage?.primary {
+                    usageValue = percent(primary.remainingPercent)
+                    if let secondary = latestOfficialUsage?.secondary {
+                        usageDetail = "\(primary.label) · \(secondary.label)剩余 \(percent(secondary.remainingPercent))"
+                    } else {
+                        usageDetail = "\(primary.label) · \(resetFormatter.string(from: primary.resetsAt)) 重置"
+                    }
+                } else if latestOfficialUsage?.isLoggedIn == true {
+                    usageDetail = "官方账号已连接，暂未返回用量"
+                }
+            case let .provider(id):
+                if let provider = ProviderStore.provider(id: id) {
+                    routeName = provider.name
+                    if provider.isCodeAPI, let usage = latestCodeUsage {
+                        usageLabel = "提供商余额"
+                        usageValue = money(usage.balance)
+                        usageDetail = "今日费用 \(money(usage.usage.today.actualCost)) · \(number(usage.usage.today.totalTokens)) Token"
+                    } else {
+                        usageLabel = "当前模型"
+                        usageValue = provider.model
+                        usageDetail = provider.baseURL
+                    }
+                }
+            }
+        }
+
+        return DashboardSnapshot(
+            agentName: agent.displayName,
+            routeName: routeName,
+            taskStatus: taskStatusText(),
+            taskSignal: taskSignal,
+            usageLabel: usageLabel,
+            usageValue: usageValue,
+            usageDetail: usageDetail,
+            updatedText: lastUpdated.map { "\(timeFormatter.string(from: $0)) · 每分钟自动刷新" } ?? "等待首次刷新",
+            version: AppUpdateChecker.currentVersion,
+            message: latestError
+        )
+    }
+
+    func refreshDashboardData() async {
+        await refreshTaskActivity(forceFileScan: true)
+        await refreshUsage()
+        settings.refreshDashboard()
+    }
+
     @objc private func manualRefresh() { Task { await refreshUsage() } }
 
     private func refreshUsage() async {
@@ -588,6 +698,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             isRefreshingUsage = false
             rebuildMainMenu()
             updateWidget()
+            settings.refreshDashboard()
         }
 
         do {
@@ -691,7 +802,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refresh.isEnabled = !isRefreshingUsage
         mainMenu.addItem(refresh)
 
-        let settingsItem = NSMenuItem(title: "路由与设置…", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: "打开 Agent Pulse…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         mainMenu.addItem(settingsItem)
         let widgetItem = NSMenuItem(title: "添加桌面组件…", action: #selector(openWidgetGuide), keyEquivalent: "")
@@ -729,7 +840,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refresh.target = self
         contextMenu.addItem(refresh)
         contextMenu.addItem(.separator())
-        let settingsItem = NSMenuItem(title: "Agent Pulse 设置…", action: #selector(openSettings), keyEquivalent: "")
+        let settingsItem = NSMenuItem(title: "打开 Agent Pulse…", action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
         contextMenu.addItem(settingsItem)
     }
@@ -931,6 +1042,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         else { renderStatusButton() }
         rebuildMainMenu()
         updateWidget()
+        settings.refreshDashboard()
     }
 
     private func mergePendingTaskEvents(

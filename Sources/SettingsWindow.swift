@@ -53,10 +53,11 @@ enum AppThemePreference {
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private enum Section: Int, CaseIterable {
-        case route, providers, appearance, version
+        case dashboard, route, providers, appearance, version
 
         var title: String {
             switch self {
+            case .dashboard: return "仪表盘"
             case .route: return "路由"
             case .providers: return "提供商"
             case .appearance: return "状态与外观"
@@ -66,6 +67,7 @@ final class SettingsWindowController: NSWindowController {
 
         var symbol: String {
             switch self {
+            case .dashboard: return "chart.bar.xaxis"
             case .route: return "arrow.triangle.branch"
             case .providers: return "server.rack"
             case .appearance: return "circle.lefthalf.filled"
@@ -80,6 +82,17 @@ final class SettingsWindowController: NSWindowController {
     private var pages: [Section: NSView] = [:]
     private var sidebarButtons: [Section: NSButton] = [:]
     private let pageHost = NSView()
+    private let dashboardAgentValue = NSTextField(labelWithString: "—")
+    private let dashboardRouteValue = NSTextField(labelWithString: "—")
+    private let dashboardTaskValue = NSTextField(labelWithString: "—")
+    private let dashboardTaskIndicator = NSImageView()
+    private let dashboardUsageTitle = NSTextField(labelWithString: "用量")
+    private let dashboardUsageValue = NSTextField(labelWithString: "—")
+    private let dashboardUsageDetail = NSTextField(wrappingLabelWithString: "正在等待数据")
+    private let dashboardUpdatedLabel = NSTextField(labelWithString: "等待首次刷新")
+    private let dashboardVersionLabel = NSTextField(labelWithString: AppUpdateChecker.currentVersion)
+    private let dashboardMessageLabel = NSTextField(wrappingLabelWithString: "运行状态正常")
+    private let dashboardRefreshButton = NSButton(title: "立即刷新", target: nil, action: nil)
 
     private let agentControl = NSSegmentedControl(
         labels: AgentKind.allCases.map(\.displayName),
@@ -124,7 +137,7 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Agent Pulse 设置"
+        window.title = "Agent Pulse"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.backgroundColor = NSColor(name: nil) { appearance in
@@ -238,11 +251,12 @@ final class SettingsWindowController: NSWindowController {
         ])
 
         configureControls()
+        pages[.dashboard] = buildDashboardPage()
         pages[.route] = buildRoutePage()
         pages[.providers] = buildProvidersPage()
         pages[.appearance] = buildAppearancePage()
         pages[.version] = buildVersionPage()
-        selectSection(.route)
+        selectSection(.dashboard)
     }
 
     private func configureControls() {
@@ -298,6 +312,112 @@ final class SettingsWindowController: NSWindowController {
         themePopup.action = #selector(themeChanged)
         themePopup.widthAnchor.constraint(equalToConstant: 240).isActive = true
 
+        dashboardRefreshButton.target = self
+        dashboardRefreshButton.action = #selector(refreshDashboardData)
+
+    }
+
+    private func buildDashboardPage() -> NSView {
+        let metrics = NSStackView(views: [
+            metricCard(title: "当前 Agent", symbol: "terminal", value: dashboardAgentValue),
+            metricCard(title: "当前路由", symbol: "arrow.triangle.branch", value: dashboardRouteValue),
+            metricCard(
+                title: "任务状态",
+                symbol: "circle.fill",
+                value: dashboardTaskValue,
+                iconView: dashboardTaskIndicator
+            )
+        ])
+        metrics.orientation = .horizontal
+        metrics.alignment = .top
+        metrics.distribution = .fillEqually
+        metrics.spacing = 12
+        metrics.arrangedSubviews.forEach {
+            $0.heightAnchor.constraint(equalToConstant: 118).isActive = true
+        }
+
+        dashboardUsageTitle.font = .systemFont(ofSize: 12, weight: .medium)
+        dashboardUsageTitle.textColor = .secondaryLabelColor
+        dashboardUsageValue.font = .monospacedDigitSystemFont(ofSize: 30, weight: .semibold)
+        dashboardUsageValue.maximumNumberOfLines = 1
+        dashboardUsageValue.lineBreakMode = .byTruncatingTail
+        dashboardUsageValue.isSelectable = true
+        dashboardUsageDetail.font = .systemFont(ofSize: 12)
+        dashboardUsageDetail.textColor = .secondaryLabelColor
+        dashboardUsageDetail.maximumNumberOfLines = 2
+        dashboardUsageDetail.isSelectable = true
+        let usageText = NSStackView(views: [dashboardUsageTitle, dashboardUsageValue, dashboardUsageDetail])
+        usageText.orientation = .vertical
+        usageText.alignment = .leading
+        usageText.spacing = 7
+        let usageSymbol = NSImageView(image: NSImage(
+            systemSymbolName: "chart.line.uptrend.xyaxis",
+            accessibilityDescription: nil
+        )!)
+        usageSymbol.symbolConfiguration = .init(pointSize: 24, weight: .regular)
+        usageSymbol.contentTintColor = .secondaryLabelColor
+        let usageRow = NSStackView(views: [usageText, NSView(), usageSymbol])
+        usageRow.orientation = .horizontal
+        usageRow.alignment = .centerY
+        usageRow.spacing = 16
+
+        dashboardUpdatedLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        dashboardUpdatedLabel.textColor = .secondaryLabelColor
+        dashboardUpdatedLabel.isSelectable = true
+        dashboardVersionLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        dashboardVersionLabel.isSelectable = true
+        dashboardMessageLabel.font = .systemFont(ofSize: 12)
+        dashboardMessageLabel.maximumNumberOfLines = 2
+        dashboardMessageLabel.isSelectable = true
+
+        return page(
+            title: "仪表盘",
+            subtitle: "查看当前 Agent、模型路由、用量和任务状态。",
+            cards: [
+                metrics,
+                card([padded(usageRow, horizontal: 20, vertical: 18)]),
+                card([
+                    settingRow(
+                        title: "数据刷新",
+                        detail: "用量每分钟自动更新，也可以立即刷新。",
+                        control: dashboardRefreshButton
+                    ),
+                    separator(),
+                    settingRow(title: "最近更新", detail: "仪表盘数据更新时间。", control: dashboardUpdatedLabel),
+                    separator(),
+                    settingRow(title: "当前版本", detail: "已安装的 Agent Pulse 版本。", control: dashboardVersionLabel)
+                ]),
+                card([padded(dashboardMessageLabel, horizontal: 18, vertical: 13)])
+            ]
+        )
+    }
+
+    private func metricCard(
+        title: String,
+        symbol: String,
+        value: NSTextField,
+        iconView: NSImageView? = nil
+    ) -> NSView {
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
+        titleLabel.textColor = .secondaryLabelColor
+        let icon = iconView ?? NSImageView()
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        icon.symbolConfiguration = .init(pointSize: 13, weight: .medium)
+        icon.contentTintColor = .secondaryLabelColor
+        let heading = NSStackView(views: [icon, titleLabel, NSView()])
+        heading.orientation = .horizontal
+        heading.alignment = .centerY
+        heading.spacing = 7
+        value.font = .systemFont(ofSize: 17, weight: .semibold)
+        value.maximumNumberOfLines = 2
+        value.lineBreakMode = .byTruncatingTail
+        value.isSelectable = true
+        let content = NSStackView(views: [heading, value, NSView()])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 11
+        return card([padded(content, horizontal: 16, vertical: 15)])
     }
 
     private func buildRoutePage() -> NSView {
@@ -590,6 +710,7 @@ final class SettingsWindowController: NSWindowController {
             button.layer?.backgroundColor = selected ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.13).cgColor : NSColor.clear.cgColor
             button.contentTintColor = selected ? .labelColor : .secondaryLabelColor
         }
+        if section == .dashboard { refreshDashboard() }
     }
 
     func present() {
@@ -620,7 +741,8 @@ final class SettingsWindowController: NSWindowController {
             themePopup.selectItem(at: index)
         }
         updateRouteFields()
-        selectSection(.route)
+        refreshDashboard()
+        selectSection(.dashboard)
         currentVersionLabel.stringValue = AppUpdateChecker.currentVersion
         checkForUpdates()
 
@@ -628,6 +750,41 @@ final class SettingsWindowController: NSWindowController {
         showWindow(nil)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    func refreshDashboard() {
+        guard let snapshot = appDelegate?.dashboardSnapshot() else { return }
+        dashboardAgentValue.stringValue = snapshot.agentName
+        dashboardRouteValue.stringValue = snapshot.routeName
+        dashboardTaskValue.stringValue = snapshot.taskStatus
+        dashboardUsageTitle.stringValue = snapshot.usageLabel
+        dashboardUsageValue.stringValue = snapshot.usageValue
+        dashboardUsageDetail.stringValue = snapshot.usageDetail
+        dashboardUpdatedLabel.stringValue = snapshot.updatedText
+        dashboardVersionLabel.stringValue = snapshot.version
+        switch snapshot.taskSignal {
+        case .red: dashboardTaskIndicator.contentTintColor = .systemRed
+        case .yellow: dashboardTaskIndicator.contentTintColor = .systemOrange
+        case .green: dashboardTaskIndicator.contentTintColor = .systemGreen
+        }
+        if let message = snapshot.message, !message.isEmpty {
+            dashboardMessageLabel.stringValue = "需要注意：\(message)"
+            dashboardMessageLabel.textColor = .systemOrange
+        } else {
+            dashboardMessageLabel.stringValue = "Agent Pulse 运行正常"
+            dashboardMessageLabel.textColor = .secondaryLabelColor
+        }
+    }
+
+    @objc private func refreshDashboardData() {
+        dashboardRefreshButton.isEnabled = false
+        dashboardRefreshButton.title = "正在刷新…"
+        Task {
+            await appDelegate?.refreshDashboardData()
+            refreshDashboard()
+            dashboardRefreshButton.isEnabled = true
+            dashboardRefreshButton.title = "立即刷新"
+        }
     }
 
     @objc private func routeChanged() {

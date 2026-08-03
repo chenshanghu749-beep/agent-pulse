@@ -9,7 +9,7 @@
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Agent Pulse Widget</string>
     <key>CFBundlePackageType</key><string>XPC!</string>
-    <key>CFBundleShortVersionString</key><string>2.8.1</string>
+    <key>CFBundleShortVersionString</key><string>2.8.2</string>
     <key>CFBundleVersion</key><string>35</string>
     <key>CFBundleSupportedPlatforms</key>
     <array><string>MacOSX</string></array>
