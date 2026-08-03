@@ -926,6 +926,20 @@ if CommandLine.arguments.contains("--login-status-test") {
             }
         }
     }
+    let compositeStatusImage = StatusIconRenderer.statusItemImage(
+        style: .pinwheel,
+        active: .green,
+        frame: 12,
+        title: "Codex · $100.00",
+        font: .systemFont(ofSize: 12, weight: .medium)
+    )
+    precondition(compositeStatusImage.size.height == 18)
+    precondition(compositeStatusImage.size.width > StatusIconRenderer.image(
+        style: .pinwheel,
+        active: .green,
+        frame: 12
+    ).size.width)
+    precondition(compositeStatusImage.tiffRepresentation != nil)
 
     let taskRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("agent-pulse-task-test-\(UUID().uuidString)", isDirectory: true)
@@ -947,14 +961,29 @@ if CommandLine.arguments.contains("--login-status-test") {
     _ = try! completedHandle.seekToEnd()
     try! completedHandle.write(contentsOf: Data(responseItem("custom_tool_call").utf8))
     try! completedHandle.synchronize()
-    precondition(TaskActivityReader.read(root: taskRoot).state == .waiting(1))
+    precondition(TaskActivityReader.read(root: taskRoot, forceFileScan: false).state == .waiting(1))
     try! completedHandle.write(contentsOf: Data(responseItem("custom_tool_call_output").utf8))
     try! completedHandle.synchronize()
-    precondition(TaskActivityReader.read(root: taskRoot).state == .running(1))
+    precondition(TaskActivityReader.read(root: taskRoot, forceFileScan: false).state == .running(1))
     try! completedHandle.write(contentsOf: Data(event("task_complete").utf8))
     try! completedHandle.synchronize()
     try! completedHandle.close()
-    precondition(TaskActivityReader.read(root: taskRoot).state == .ready)
+    precondition(TaskActivityReader.read(root: taskRoot, forceFileScan: false).state == .ready)
+
+    let indexedEventSession = taskRoot.appendingPathComponent("event-indexed.jsonl")
+    try! Data(event("task_started").utf8).write(to: indexedEventSession)
+    let indexedEvent = TaskActivityFileEvent(path: indexedEventSession.path, flags: 0)
+    precondition(TaskActivityReader.read(
+        root: taskRoot,
+        fileEvents: [indexedEvent],
+        forceFileScan: false
+    ).state == .running(1))
+    try! Data((event("task_started") + event("task_complete")).utf8).write(to: indexedEventSession)
+    precondition(TaskActivityReader.read(
+        root: taskRoot,
+        fileEvents: [indexedEvent],
+        forceFileScan: false
+    ).state == .ready)
 
     let instantToolSession = taskRoot.appendingPathComponent("instant-tool.jsonl")
     try! Data((
@@ -987,6 +1016,27 @@ if CommandLine.arguments.contains("--login-status-test") {
     """
     try! Data(staleEvents.utf8).write(to: staleSession)
     precondition(TaskActivityReader.read(root: taskRoot).state == .ready)
+
+    let monitorRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("agent-pulse-monitor-test-\(UUID().uuidString)", isDirectory: true)
+    try! FileManager.default.createDirectory(at: monitorRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: monitorRoot) }
+    let monitorSignal = DispatchSemaphore(value: 0)
+    let normalizedMonitorRoot = monitorRoot.standardizedFileURL.resolvingSymlinksInPath().path
+    let monitor = TaskActivityMonitor(paths: [monitorRoot]) { events in
+        if events.contains(where: { $0.path.hasPrefix(normalizedMonitorRoot) }) {
+            monitorSignal.signal()
+        }
+    }
+    let monitorStarted = monitor.start()
+    precondition(monitorStarted)
+    Thread.sleep(forTimeInterval: 0.2)
+    try! Data(event("task_started").utf8).write(
+        to: monitorRoot.appendingPathComponent("event.jsonl")
+    )
+    let monitorResult = monitorSignal.wait(timeout: .now() + 3)
+    precondition(monitorResult == .success)
+    monitor.stop()
 
     let migrationRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("agent-pulse-session-migration-\(UUID().uuidString)", isDirectory: true)

@@ -1,19 +1,36 @@
 import AppKit
 import Foundation
 
+private final class StatusIconOverlayView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private struct StatusRenderKey: Equatable {
+        let style: StatusIconStyle
+        let previousSignal: TrafficSignal
+        let targetSignal: TrafficSignal
+        let previousFrame: Int
+        let targetFrame: Int
+        let transitionStep: Int
+        let toolTip: String
+        let appearance: String
+    }
+
     private var statusItem: NSStatusItem!
     private let mainMenu = NSMenu()
     private let contextMenu = NSMenu()
 
     private var usageTimer: Timer?
     private var taskTimer: Timer?
+    private var taskActivityMonitor: TaskActivityMonitor?
     private var iconAnimationTimer: Timer?
     private var startupChaseTimer: Timer?
     private var startupChaseIndex: Int?
     private var agent = AgentPreference.selected
     private var route = RouteConfigManager.currentRoute()
+    private var routeDisplayName = "OpenAI 官方"
     private var latestCodeUsage: UsageResponse?
     private var latestOfficialUsage: OfficialUsageSnapshot?
     private var latestCursorStatus = CursorStatus.unavailable
@@ -24,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastUpdated: Date?
     private var isRefreshingUsage = false
     private var isRefreshingTask = false
+    private var pendingTaskFileEvents: [String: TaskActivityFileEvent] = [:]
+    private var pendingTaskForceScan = false
     private var taskSnapshot = TaskActivitySnapshot(state: .ready, changedAt: nil)
     private var statusIconStyle = StatusIconPreference.selected
     private var displayedSignal: TrafficSignal = .green
@@ -31,6 +50,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var targetSignal: TrafficSignal = .green
     private var transitionStartedAt = Date.distantPast
     private var animationFrame = 0
+    private var iconAnimationFPS: Double = 0
+    private var lastStatusRenderKey: StatusRenderKey?
+    private weak var statusIconOverlayView: StatusIconOverlayView?
+    private var statusIconPlaceholderSize = NSSize.zero
+    private var isUsingNativeStatusImage = false
+    private var statusTitleText = ""
     private let iconAnimationStartUptime = ProcessInfo.processInfo.systemUptime
     private lazy var settings = SettingsWindowController(appDelegate: self)
     private let chatCompletionsBridge = ChatCompletionsBridge()
@@ -59,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             latestError = error.localizedDescription
         }
         route = RouteConfigManager.currentRoute()
+        routeDisplayName = route.displayName
         if agent == .cursor {
             do {
                 cursorHooksNeedRestart = try CursorIntegration.installHooks()
@@ -80,24 +106,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         usageTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refreshUsage() }
         }
-        taskTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refreshTaskActivity() }
+        usageTimer?.tolerance = 5
+        startTaskActivityMonitor()
+        taskTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.refreshTaskActivity(forceFileScan: true) }
         }
-        iconAnimationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                let elapsed = ProcessInfo.processInfo.systemUptime - self.iconAnimationStartUptime
-                self.animationFrame = Int(elapsed * 60)
-                self.renderStatusButton()
-            }
-        }
-        [usageTimer, taskTimer, iconAnimationTimer].compactMap { $0 }.forEach {
+        taskTimer?.tolerance = 2
+        [usageTimer, taskTimer].compactMap { $0 }.forEach {
             RunLoop.main.add($0, forMode: .common)
         }
 
         updateWidget()
         Task {
-            await refreshTaskActivity()
+            await refreshTaskActivity(forceFileScan: true)
             await refreshUsage()
         }
 
@@ -195,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         usageTimer?.invalidate()
         taskTimer?.invalidate()
+        taskActivityMonitor?.stop()
         iconAnimationTimer?.invalidate()
         startupChaseTimer?.invalidate()
         chatCompletionsBridge.stop()
@@ -212,6 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func routeDidChange(to route: RouteChoice, validatedCodeUsage: UsageResponse?) {
         self.route = route
+        routeDisplayName = route.displayName
         latestError = nil
         lastUpdated = Date()
         latestCodeUsage = validatedCodeUsage
@@ -245,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func statusIconStyleDidChange(to style: StatusIconStyle) {
         statusIconStyle = style
         StatusIconPreference.selected = style
+        lastStatusRenderKey = nil
         renderStatusButton()
         rebuildMainMenu()
     }
@@ -297,6 +321,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.imagePosition = .imageLeading
         button.imageScaling = .scaleNone
         button.font = .systemFont(ofSize: 12, weight: .medium)
+        button.wantsLayer = true
+        let overlay = StatusIconOverlayView()
+        overlay.layer?.contentsGravity = .center
+        overlay.layer?.contentsScale = 2
+        button.addSubview(overlay)
+        statusIconOverlayView = overlay
         updateStatusTitle()
         renderStatusButton()
     }
@@ -330,8 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let usage = latestCursorProviderUsage {
                 parts.append(money(usage.balance))
             }
-            button.title = parts.joined(separator: " · ")
-            button.toolTip = "Agent Pulse · Cursor"
+            applyStatusTitle(parts.joined(separator: " · "), toolTip: "Agent Pulse · Cursor", to: button)
             return
         }
         let title: String
@@ -354,8 +383,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 title = "官方 …"
             }
         }
-        button.title = "Codex · \(title)"
-        button.toolTip = "Agent Pulse · Codex · \(route.displayName)"
+        applyStatusTitle(
+            "Codex · \(title)",
+            toolTip: "Agent Pulse · Codex · \(route.displayName)",
+            to: button
+        )
+    }
+
+    private func applyStatusTitle(_ title: String, toolTip: String, to button: NSStatusBarButton) {
+        let titleChanged = title != statusTitleText
+        statusTitleText = title
+        button.toolTip = toolTip
+        if statusIconStyle == .pinwheel {
+            button.title = ""
+            if titleChanged {
+                lastStatusRenderKey = nil
+                renderStatusButton()
+            }
+        } else {
+            button.title = title
+        }
     }
 
     private func compact(_ value: String) -> String {
@@ -379,6 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         previousSignal = targetSignal
         targetSignal = newSignal
         transitionStartedAt = Date()
+        lastStatusRenderKey = nil
     }
 
     private func renderStatusButton() {
@@ -386,16 +434,131 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateSignalTarget()
         let elapsed = Date().timeIntervalSince(transitionStartedAt)
         let progress = min(1, max(0, elapsed / 0.28))
+        let transitionStep = progress >= 1 ? 20 : Int((progress * 20).rounded())
+        let previousFrame = StatusIconRenderer.animationPhase(
+            style: statusIconStyle,
+            active: previousSignal,
+            frame: animationFrame
+        )
+        let targetFrame = StatusIconRenderer.animationPhase(
+            style: statusIconStyle,
+            active: targetSignal,
+            frame: animationFrame
+        )
+        let routeText = agent == .codex ? " · \(routeDisplayName)" : ""
+        let toolTip = "Agent Pulse · \(agent.displayName) · \(taskStatusText())\(routeText)"
+        let appearance = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? "dark"
+            : "light"
+        let renderKey = StatusRenderKey(
+            style: statusIconStyle,
+            previousSignal: previousSignal,
+            targetSignal: targetSignal,
+            previousFrame: previousFrame,
+            targetFrame: targetFrame,
+            transitionStep: transitionStep,
+            toolTip: toolTip,
+            appearance: appearance
+        )
+        if renderKey == lastStatusRenderKey {
+            syncIconAnimationTimer()
+            return
+        }
+        lastStatusRenderKey = renderKey
         let oldImage = StatusIconRenderer.image(style: statusIconStyle, active: previousSignal, frame: animationFrame)
         let newImage = StatusIconRenderer.image(style: statusIconStyle, active: targetSignal, frame: animationFrame)
+        let statusImage: NSImage
         if progress >= 1 {
             displayedSignal = targetSignal
-            button.image = newImage
+            statusImage = newImage
         } else {
-            button.image = StatusIconRenderer.blended(from: oldImage, to: newImage, progress: CGFloat(progress))
+            statusImage = StatusIconRenderer.blended(
+                from: oldImage,
+                to: newImage,
+                progress: CGFloat(transitionStep) / 20
+            )
         }
-        let routeText = agent == .codex ? " · \(route.displayName)" : ""
-        button.toolTip = "Agent Pulse · \(agent.displayName) · \(taskStatusText())\(routeText)"
+        displayStatusImage(statusImage, in: button)
+        button.toolTip = toolTip
+        syncIconAnimationTimer()
+    }
+
+    private func displayStatusImage(_ image: NSImage, in button: NSStatusBarButton) {
+        if statusIconStyle == .pinwheel {
+            let composite = StatusIconRenderer.statusItemImage(
+                style: .pinwheel,
+                active: targetSignal,
+                frame: animationFrame,
+                title: statusTitleText,
+                font: button.font ?? .systemFont(ofSize: 12, weight: .medium)
+            )
+            isUsingNativeStatusImage = true
+            statusIconPlaceholderSize = composite.size
+            statusIconOverlayView?.isHidden = true
+            button.title = ""
+            button.image = composite
+            return
+        }
+        button.title = statusTitleText
+        statusIconOverlayView?.isHidden = false
+        if isUsingNativeStatusImage || statusIconPlaceholderSize != image.size {
+            isUsingNativeStatusImage = false
+            statusIconPlaceholderSize = image.size
+            button.image = NSImage(size: image.size)
+            button.needsLayout = true
+            button.layoutSubtreeIfNeeded()
+        }
+        layoutStatusIconOverlay(in: button)
+        if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            statusIconOverlayView?.layer?.contents = cgImage
+        }
+    }
+
+    private func layoutStatusIconOverlay(in button: NSStatusBarButton) {
+        guard let overlay = statusIconOverlayView else { return }
+        button.layoutSubtreeIfNeeded()
+        if let cell = button.cell as? NSButtonCell {
+            overlay.frame = cell.imageRect(forBounds: button.bounds)
+        }
+    }
+
+    private func syncIconAnimationTimer() {
+        let transitionActive = statusIconStyle != .pinwheel
+            && Date().timeIntervalSince(transitionStartedAt) < 0.28
+        let desiredFPS = transitionActive
+            ? 16
+            : statusIconStyle.animationFramesPerSecond(for: targetSignal)
+        guard desiredFPS != iconAnimationFPS else { return }
+        iconAnimationTimer?.invalidate()
+        iconAnimationTimer = nil
+        iconAnimationFPS = desiredFPS
+        guard desiredFPS > 0 else { return }
+        let timer = Timer(
+            timeInterval: 1 / desiredFPS,
+            target: self,
+            selector: #selector(iconAnimationTick),
+            userInfo: nil,
+            repeats: true
+        )
+        iconAnimationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    @objc private func iconAnimationTick() {
+        let elapsed = ProcessInfo.processInfo.systemUptime - iconAnimationStartUptime
+        animationFrame = Int(elapsed * 60)
+        if statusIconStyle == .pinwheel,
+           let button = statusItem?.button {
+            button.image = StatusIconRenderer.statusItemImage(
+                style: .pinwheel,
+                active: targetSignal,
+                frame: animationFrame,
+                title: statusTitleText,
+                font: button.font ?? .systemFont(ofSize: 12, weight: .medium)
+            )
+            return
+        }
+        renderStatusButton()
     }
 
     private func taskStatusText() -> String {
@@ -413,7 +576,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !isRefreshingUsage else { return }
         isRefreshingUsage = true
         if agent == .codex {
-            route = RouteConfigManager.currentRoute()
+            let currentRoute = RouteConfigManager.currentRoute()
+            if currentRoute != route {
+                route = currentRoute
+                routeDisplayName = currentRoute.displayName
+                lastStatusRenderKey = nil
+            }
         }
         rebuildMainMenu()
         defer {
@@ -707,27 +875,90 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func refreshTaskActivity() async {
-        guard !isRefreshingTask else { return }
+    private func startTaskActivityMonitor() {
+        taskActivityMonitor?.stop()
+        let monitor = TaskActivityMonitor(paths: [
+            TaskActivityReader.defaultRootURL,
+            CursorIntegration.supportDirectoryURL
+        ]) { [weak self] events in
+            Task { @MainActor in
+                guard let self else { return }
+                let root = self.agent == .codex
+                    ? TaskActivityReader.defaultRootURL
+                    : CursorIntegration.supportDirectoryURL
+                let normalizedRoot = root.standardizedFileURL.resolvingSymlinksInPath().path
+                let relevantEvents = events.filter { $0.path.hasPrefix(normalizedRoot) }
+                guard !relevantEvents.isEmpty else { return }
+                await self.refreshTaskActivity(fileEvents: relevantEvents)
+            }
+        }
+        taskActivityMonitor = monitor
+        _ = monitor.start()
+    }
+
+    private func refreshTaskActivity(
+        fileEvents: [TaskActivityFileEvent] = [],
+        forceFileScan: Bool = false
+    ) async {
+        guard !isRefreshingTask else {
+            mergePendingTaskEvents(fileEvents, forceFileScan: forceFileScan)
+            return
+        }
         isRefreshingTask = true
         let selectedAgent = agent
         let snapshot = await Task.detached(priority: .utility) {
             switch selectedAgent {
             case .cursor: return CursorActivityReader.read()
-            case .codex: return TaskActivityReader.read()
+            case .codex:
+                return TaskActivityReader.read(
+                    fileEvents: fileEvents,
+                    forceFileScan: forceFileScan
+                )
             }
         }.value
+        isRefreshingTask = false
+        schedulePendingTaskRefreshIfNeeded()
+        guard snapshot != taskSnapshot else {
+            return
+        }
         let shouldPlayCompletionChase: Bool
         switch (taskSnapshot.state, snapshot.state) {
         case (.running, .ready), (.waiting, .ready): shouldPlayCompletionChase = true
         default: shouldPlayCompletionChase = false
         }
         taskSnapshot = snapshot
-        isRefreshingTask = false
         if shouldPlayCompletionChase { startStartupChase() }
         else { renderStatusButton() }
         rebuildMainMenu()
         updateWidget()
+    }
+
+    private func mergePendingTaskEvents(
+        _ events: [TaskActivityFileEvent],
+        forceFileScan: Bool
+    ) {
+        pendingTaskForceScan = pendingTaskForceScan || forceFileScan
+        for event in events {
+            if let existing = pendingTaskFileEvents[event.path] {
+                pendingTaskFileEvents[event.path] = TaskActivityFileEvent(
+                    path: event.path,
+                    flags: existing.flags | event.flags
+                )
+            } else {
+                pendingTaskFileEvents[event.path] = event
+            }
+        }
+    }
+
+    private func schedulePendingTaskRefreshIfNeeded() {
+        guard pendingTaskForceScan || !pendingTaskFileEvents.isEmpty else { return }
+        let events = Array(pendingTaskFileEvents.values)
+        let forceFileScan = pendingTaskForceScan
+        pendingTaskFileEvents.removeAll(keepingCapacity: true)
+        pendingTaskForceScan = false
+        Task { @MainActor [weak self] in
+            await self?.refreshTaskActivity(fileEvents: events, forceFileScan: forceFileScan)
+        }
     }
 
     private func startStartupChase() {

@@ -23,6 +23,7 @@ swiftc \
   -target arm64-apple-macos13.0 \
   -module-cache-path "$MODULE_CACHE_DIR" \
   -framework AppKit \
+  -framework CoreServices \
   -framework WidgetKit \
   "$ROOT_DIR"/Sources/*.swift \
   -o "$MACOS_DIR/AgentPulse"

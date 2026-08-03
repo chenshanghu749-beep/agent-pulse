@@ -1,3 +1,4 @@
+import CoreServices
 import Foundation
 
 enum TaskRunState: Sendable, Equatable {
@@ -6,13 +7,137 @@ enum TaskRunState: Sendable, Equatable {
     case ready
 }
 
-struct TaskActivitySnapshot: Sendable {
+struct TaskActivitySnapshot: Sendable, Equatable {
     let state: TaskRunState
     let changedAt: Date?
 }
 
+struct TaskActivityFileEvent: Sendable {
+    let path: String
+    let flags: FSEventStreamEventFlags
+
+    init(path: String, flags: FSEventStreamEventFlags) {
+        self.path = URL(fileURLWithPath: path)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        self.flags = flags
+    }
+
+    var requiresFullScan: Bool {
+        let rescanFlags = FSEventStreamEventFlags(
+            kFSEventStreamEventFlagMustScanSubDirs
+                | kFSEventStreamEventFlagUserDropped
+                | kFSEventStreamEventFlagKernelDropped
+                | kFSEventStreamEventFlagRootChanged
+                | kFSEventStreamEventFlagMount
+                | kFSEventStreamEventFlagUnmount
+        )
+        let isDirectory = flags & FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsDir) != 0
+        return flags & rescanFlags != 0 || isDirectory
+    }
+}
+
+final class TaskActivityMonitor {
+    typealias Handler = ([TaskActivityFileEvent]) -> Void
+
+    private let paths: [URL]
+    private let handler: Handler
+    private let queue = DispatchQueue(label: "net.nexita.agent-pulse.task-events", qos: .utility)
+    private var stream: FSEventStreamRef?
+    private var pendingEvents: [String: TaskActivityFileEvent] = [:]
+    private var pendingWorkItem: DispatchWorkItem?
+
+    init(paths: [URL], handler: @escaping Handler) {
+        self.paths = paths
+        self.handler = handler
+    }
+
+    @discardableResult
+    func start() -> Bool {
+        guard stream == nil else { return true }
+        let existingPaths = paths.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !existingPaths.isEmpty else { return false }
+
+        var context = FSEventStreamContext(
+            version: 0,
+            info: Unmanaged.passUnretained(self).toOpaque(),
+            retain: nil,
+            release: nil,
+            copyDescription: nil
+        )
+        let callback: FSEventStreamCallback = { _, clientInfo, eventCount, eventPaths, eventFlags, _ in
+            guard let clientInfo else { return }
+            let monitor = Unmanaged<TaskActivityMonitor>.fromOpaque(clientInfo).takeUnretainedValue()
+            let paths = eventPaths.bindMemory(to: UnsafePointer<CChar>.self, capacity: eventCount)
+            var events: [TaskActivityFileEvent] = []
+            events.reserveCapacity(eventCount)
+            for index in 0..<eventCount {
+                events.append(TaskActivityFileEvent(
+                    path: String(cString: paths[index]),
+                    flags: eventFlags[index]
+                ))
+            }
+            monitor.receive(events)
+        }
+        let createFlags = FSEventStreamCreateFlags(
+            kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer
+        )
+        guard let stream = FSEventStreamCreate(
+            kCFAllocatorDefault,
+            callback,
+            &context,
+            existingPaths.map(\.path) as CFArray,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            0.12,
+            createFlags
+        ) else { return false }
+        self.stream = stream
+        FSEventStreamSetDispatchQueue(stream, queue)
+        guard FSEventStreamStart(stream) else {
+            FSEventStreamInvalidate(stream)
+            self.stream = nil
+            return false
+        }
+        return true
+    }
+
+    func stop() {
+        pendingWorkItem?.cancel()
+        pendingWorkItem = nil
+        pendingEvents.removeAll()
+        guard let stream else { return }
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        self.stream = nil
+    }
+
+    deinit { stop() }
+
+    private func receive(_ events: [TaskActivityFileEvent]) {
+        for event in events {
+            pendingEvents[event.path] = event
+        }
+        pendingWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let events = Array(self.pendingEvents.values)
+            self.pendingEvents.removeAll(keepingCapacity: true)
+            self.pendingWorkItem = nil
+            self.handler(events)
+        }
+        pendingWorkItem = workItem
+        queue.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+    }
+}
+
 enum TaskActivityReader {
     private static let abandonedSessionInterval: TimeInterval = 30 * 60
+
+    static var defaultRootURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/sessions", isDirectory: true)
+    }
 
     private struct FileState {
         var state: TaskRunState
@@ -30,30 +155,33 @@ enum TaskActivityReader {
         let sawToolCall: Bool
     }
 
+    private struct FileIndex {
+        let rootPath: String
+        var files: [String: Date]
+    }
+
     private static let cacheLock = NSLock()
     private static var cache: [String: CacheEntry] = [:]
+    private static var fileIndex: FileIndex?
+    private static let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     static func read(
         root customRoot: URL? = nil,
-        now: Date = Date()
+        now: Date = Date(),
+        fileEvents: [TaskActivityFileEvent] = [],
+        forceFileScan: Bool = true
     ) -> TaskActivitySnapshot {
-        let root = customRoot ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/sessions", isDirectory: true)
-        guard let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return TaskActivitySnapshot(state: .ready, changedAt: nil) }
-
-        let cutoff = Date().addingTimeInterval(-48 * 60 * 60)
-        var files: [(URL, Date)] = []
-        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
-                  values.isRegularFile == true,
-                  let modified = values.contentModificationDate,
-                  modified >= cutoff else { continue }
-            files.append((url, modified))
-        }
+        let root = customRoot ?? defaultRootURL
+        let files = indexedFiles(
+            root: root,
+            cutoff: now.addingTimeInterval(-48 * 60 * 60),
+            fileEvents: fileEvents,
+            forceFileScan: forceFileScan || fileEvents.contains(where: \.requiresFullScan)
+        )
 
         let results = files
             .sorted { $0.1 > $1.1 }
@@ -97,6 +225,58 @@ enum TaskActivityReader {
             return TaskActivitySnapshot(state: .ready, changedAt: ready.timestamp)
         }
         return TaskActivitySnapshot(state: .ready, changedAt: nil)
+    }
+
+    private static func indexedFiles(
+        root: URL,
+        cutoff: Date,
+        fileEvents: [TaskActivityFileEvent],
+        forceFileScan: Bool
+    ) -> [(URL, Date)] {
+        let root = root.standardizedFileURL.resolvingSymlinksInPath()
+        cacheLock.lock()
+        var index = fileIndex?.rootPath == root.path ? fileIndex : nil
+        cacheLock.unlock()
+
+        if forceFileScan || index == nil {
+            var files: [String: Date] = [:]
+            if let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+                    guard let modified = regularFileModificationDate(url), modified >= cutoff else { continue }
+                    files[url.path] = modified
+                }
+            }
+            index = FileIndex(rootPath: root.path, files: files)
+        } else if var updatedIndex = index {
+            for event in fileEvents {
+                guard event.path.hasPrefix(root.path) else { continue }
+                let url = URL(fileURLWithPath: event.path)
+                guard url.pathExtension == "jsonl" else { continue }
+                if let modified = regularFileModificationDate(url), modified >= cutoff {
+                    updatedIndex.files[url.path] = modified
+                } else {
+                    updatedIndex.files.removeValue(forKey: url.path)
+                }
+            }
+            updatedIndex.files = updatedIndex.files.filter { $0.value >= cutoff }
+            index = updatedIndex
+        }
+
+        let resolved = index ?? FileIndex(rootPath: root.path, files: [:])
+        cacheLock.lock()
+        fileIndex = resolved
+        cacheLock.unlock()
+        return resolved.files.map { (URL(fileURLWithPath: $0.key), $0.value) }
+    }
+
+    private static func regularFileModificationDate(_ url: URL) -> Date? {
+        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+              values.isRegularFile == true else { return nil }
+        return values.contentModificationDate
     }
 
     private static func readState(from url: URL, fallbackDate: Date) -> FileReadResult? {
@@ -182,8 +362,6 @@ enum TaskActivityReader {
     }
 
     private static func parseDate(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value)
+        timestampFormatter.date(from: value)
     }
 }

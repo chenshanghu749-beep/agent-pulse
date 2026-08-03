@@ -34,6 +34,25 @@ enum StatusIconStyle: String, CaseIterable {
         case .statusRing: return "状态圆环"
         }
     }
+
+    func animationFramesPerSecond(for signal: TrafficSignal) -> Double {
+        switch self {
+        case .pinwheel:
+            switch signal {
+            case .red: return 30
+            case .yellow: return 28
+            case .green: return 24
+            }
+        case .topHatMascot, .basketballMascot, .trumpMascot:
+            switch signal {
+            case .red: return 18
+            case .yellow: return 12
+            case .green: return 0
+            }
+        case .trafficLight, .lightBulb, .statusRing:
+            return 0
+        }
+    }
 }
 
 enum StatusIconPreference {
@@ -50,20 +69,102 @@ enum StatusIconPreference {
 }
 
 enum StatusIconRenderer {
+    private static let imageCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 512
+        return cache
+    }()
+    private static let statusItemImageCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 384
+        return cache
+    }()
+    private static let statusTextImageCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 24
+        return cache
+    }()
+
+    static func animationPhase(style: StatusIconStyle, active: TrafficSignal, frame: Int) -> Int {
+        switch style {
+        case .topHatMascot: return frame % 8
+        case .basketballMascot: return frame % 12
+        case .trumpMascot: return frame % 24
+        case .pinwheel:
+            let degreesPerSecond: Double
+            switch active {
+            case .red: degreesPerSecond = 740
+            case .yellow: degreesPerSecond = 310
+            case .green: degreesPerSecond = 80
+            }
+            let phase = Int((Double(frame) * degreesPerSecond / 75).rounded(.down))
+            return phase % 72
+        case .trafficLight, .lightBulb, .statusRing:
+            return 0
+        }
+    }
+
     static func image(style: StatusIconStyle, active: TrafficSignal, frame: Int = 0) -> NSImage {
+        let phase = animationPhase(style: style, active: active, frame: frame)
+        let effectiveAppearance = NSApp?.effectiveAppearance ?? NSAppearance(named: .aqua)!
+        let appearance = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? "dark"
+            : "light"
+        let cacheKey = "\(style.rawValue)|\(String(describing: active))|\(phase)|\(appearance)" as NSString
+        if let cached = imageCache.object(forKey: cacheKey) { return cached }
         let image: NSImage
         switch style {
         case .trafficLight: image = trafficLight(active: active)
         case .lightBulb: image = lightBulb(active: active)
-        case .topHatMascot: image = topHatMascot(active: active, frame: frame)
-        case .basketballMascot: image = basketballMascot(active: active, frame: frame)
-        case .trumpMascot: image = trumpMascot(active: active, frame: frame)
-        case .pinwheel: image = pinwheel(active: active, frame: frame)
+        case .topHatMascot: image = topHatMascot(active: active, frame: phase)
+        case .basketballMascot: image = basketballMascot(active: active, frame: phase)
+        case .trumpMascot: image = trumpMascot(active: active, frame: phase)
+        case .pinwheel: image = pinwheel(active: active, phase: phase, phaseCount: 72)
         case .statusRing: image = statusRing(active: active)
         }
         image.isTemplate = false
         image.accessibilityDescription = "\(style.displayName)状态图标"
+        imageCache.setObject(image, forKey: cacheKey)
         return image
+    }
+
+    static func statusItemImage(
+        style: StatusIconStyle,
+        active: TrafficSignal,
+        frame: Int,
+        title: String,
+        font: NSFont
+    ) -> NSImage {
+        let phase = animationPhase(style: style, active: active, frame: frame)
+        let appearance = appearanceKey()
+        let fontName = font.fontDescriptor.postscriptName ?? font.fontName
+        let cacheKey = "status-item|\(style.rawValue)|\(String(describing: active))|\(phase)|\(title)|\(fontName)|\(font.pointSize)|\(appearance)" as NSString
+        if let cached = statusItemImageCache.object(forKey: cacheKey) { return cached }
+
+        let icon = image(style: style, active: active, frame: frame)
+        let text = statusTextImage(title: title, font: font, appearance: appearance)
+        let spacing: CGFloat = title.isEmpty ? 0 : 4
+        let width = ceil(icon.size.width + spacing + text.size.width)
+        let composite = canvas(width: width) { _ in
+            icon.draw(
+                in: NSRect(origin: .zero, size: icon.size),
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1
+            )
+            if !title.isEmpty {
+                text.draw(
+                    in: NSRect(x: icon.size.width + spacing, y: 0, width: text.size.width, height: 18),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1
+                )
+            }
+        }
+        composite.isTemplate = false
+        composite.accessibilityDescription = title
+        statusItemImageCache.setObject(composite, forKey: cacheKey)
+        return composite
     }
 
     static func blended(from: NSImage, to: NSImage, progress: CGFloat) -> NSImage {
@@ -79,10 +180,75 @@ enum StatusIconRenderer {
     }
 
     private static func canvas(width: CGFloat, drawing: @escaping (NSRect) -> Void) -> NSImage {
-        NSImage(size: NSSize(width: width, height: 18), flipped: false) { rect in
-            drawing(rect)
-            return true
+        let size = NSSize(width: width, height: 18)
+        let scale: CGFloat = 2
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * scale),
+            pixelsHigh: Int(size.height * scale),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return NSImage(size: size, flipped: false) { rect in
+                drawing(rect)
+                return true
+            }
         }
+        representation.size = size
+        guard let context = NSGraphicsContext(bitmapImageRep: representation) else {
+            return NSImage(size: size, flipped: false) { rect in
+                drawing(rect)
+                return true
+            }
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        drawing(NSRect(origin: .zero, size: size))
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+        let image = NSImage(size: size)
+        image.addRepresentation(representation)
+        return image
+    }
+
+    private static func statusTextImage(title: String, font: NSFont, appearance: String) -> NSImage {
+        guard !title.isEmpty else { return NSImage(size: .zero) }
+        let fontName = font.fontDescriptor.postscriptName ?? font.fontName
+        let cacheKey = "status-text|\(title)|\(fontName)|\(font.pointSize)|\(appearance)" as NSString
+        if let cached = statusTextImageCache.object(forKey: cacheKey) { return cached }
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.labelColor
+        ]
+        let attributedTitle = NSAttributedString(string: title, attributes: attributes)
+        let measured = attributedTitle.boundingRect(
+            with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: 18),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let width = max(1, ceil(measured.width))
+        let image = canvas(width: width) { _ in
+            let textSize = attributedTitle.size()
+            attributedTitle.draw(at: NSPoint(
+                x: 0,
+                y: floor((18 - textSize.height) / 2) + 0.5
+            ))
+        }
+        image.isTemplate = false
+        statusTextImageCache.setObject(image, forKey: cacheKey)
+        return image
+    }
+
+    private static func appearanceKey() -> String {
+        let effectiveAppearance = NSApp?.effectiveAppearance ?? NSAppearance(named: .aqua)!
+        return effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? "dark"
+            : "light"
     }
 
     private static func trafficLight(active: TrafficSignal) -> NSImage {
@@ -483,92 +649,91 @@ enum StatusIconRenderer {
         hands.stroke()
     }
 
-    private static func pinwheel(active: TrafficSignal, frame: Int) -> NSImage {
+    private static func pinwheel(active: TrafficSignal, phase: Int, phaseCount: CGFloat) -> NSImage {
         canvas(width: 29) { _ in
             let center = NSPoint(x: 14.5, y: 9.0)
-
-            let pole = NSBezierPath()
-            pole.move(to: NSPoint(x: center.x, y: center.y - 1.8))
-            pole.line(to: NSPoint(x: center.x, y: 0.5))
-            NSColor.labelColor.withAlphaComponent(0.78).setStroke()
-            pole.lineWidth = 1.6
-            pole.lineCapStyle = .round
-            pole.stroke()
-
-            let degreesPerSecond: CGFloat
-            switch active {
-            case .red: degreesPerSecond = 740
-            case .yellow: degreesPerSecond = 310
-            case .green: degreesPerSecond = 80
-            }
-            let rotation = CGFloat(frame) / 60 * degreesPerSecond
-
-            for bladeIndex in 0..<4 {
-                NSGraphicsContext.saveGraphicsState()
-                let transform = NSAffineTransform()
-                transform.translateX(by: center.x, yBy: center.y)
-                transform.rotate(byDegrees: rotation + CGFloat(bladeIndex) * 90)
-                transform.concat()
-
-                let blade = NSBezierPath()
-                blade.move(to: NSPoint(x: -0.7, y: 1.4))
-                blade.curve(
-                    to: NSPoint(x: -0.8, y: 8.1),
-                    controlPoint1: NSPoint(x: -0.4, y: 3.9),
-                    controlPoint2: NSPoint(x: -1.6, y: 6.9)
-                )
-                blade.curve(
-                    to: NSPoint(x: 0.4, y: 8.9),
-                    controlPoint1: NSPoint(x: -0.6, y: 8.6),
-                    controlPoint2: NSPoint(x: 0.0, y: 9.0)
-                )
-                blade.curve(
-                    to: NSPoint(x: 1.8, y: 8.3),
-                    controlPoint1: NSPoint(x: 0.9, y: 8.9),
-                    controlPoint2: NSPoint(x: 1.5, y: 8.7)
-                )
-                blade.curve(
-                    to: NSPoint(x: 5.8, y: 5.1),
-                    controlPoint1: NSPoint(x: 3.0, y: 7.8),
-                    controlPoint2: NSPoint(x: 5.0, y: 6.2)
-                )
-                blade.curve(
-                    to: NSPoint(x: 6.1, y: 4.2),
-                    controlPoint1: NSPoint(x: 6.1, y: 4.8),
-                    controlPoint2: NSPoint(x: 6.2, y: 4.4)
-                )
-                blade.curve(
-                    to: NSPoint(x: 5.3, y: 3.6),
-                    controlPoint1: NSPoint(x: 6.0, y: 3.9),
-                    controlPoint2: NSPoint(x: 5.7, y: 3.6)
-                )
-                blade.curve(
-                    to: NSPoint(x: 0.8, y: 1.2),
-                    controlPoint1: NSPoint(x: 4.0, y: 3.3),
-                    controlPoint2: NSPoint(x: 2.0, y: 1.8)
-                )
-                blade.close()
-                NSColor.windowBackgroundColor.setFill()
-                blade.fill()
-                NSColor.labelColor.withAlphaComponent(0.92).setStroke()
-                blade.lineWidth = 1
-                blade.lineJoinStyle = .round
-                blade.stroke()
-                NSGraphicsContext.restoreGraphicsState()
-            }
-
-            let hub = NSBezierPath(ovalIn: NSRect(
-                x: center.x - 2.1,
-                y: center.y - 2.1,
-                width: 4.2,
-                height: 4.2
-            ))
-            NSColor.windowBackgroundColor.setFill()
-            hub.fill()
-            NSColor.labelColor.withAlphaComponent(0.92).setStroke()
-            hub.lineWidth = 1.2
-            hub.stroke()
+            drawPinwheelPole(center: center)
+            let rotation = CGFloat(phase) / phaseCount * 90
+            drawPinwheelRotor(center: center, rotation: rotation)
         }
+    }
+
+    private static func drawPinwheelPole(center: NSPoint) {
+        let pole = NSBezierPath()
+        pole.move(to: NSPoint(x: center.x, y: center.y - 1.8))
+        pole.line(to: NSPoint(x: center.x, y: 0.5))
+        NSColor.labelColor.withAlphaComponent(0.78).setStroke()
+        pole.lineWidth = 1.6
+        pole.lineCapStyle = .round
+        pole.stroke()
+    }
+
+    private static func drawPinwheelRotor(center: NSPoint, rotation: CGFloat) {
+        for bladeIndex in 0..<4 {
+            NSGraphicsContext.saveGraphicsState()
+            let transform = NSAffineTransform()
+            transform.translateX(by: center.x, yBy: center.y)
+            transform.rotate(byDegrees: rotation + CGFloat(bladeIndex) * 90)
+            transform.concat()
+
+            let blade = NSBezierPath()
+            blade.move(to: NSPoint(x: -0.7, y: 1.4))
+            blade.curve(
+                to: NSPoint(x: -0.8, y: 8.1),
+                controlPoint1: NSPoint(x: -0.4, y: 3.9),
+                controlPoint2: NSPoint(x: -1.6, y: 6.9)
+            )
+            blade.curve(
+                to: NSPoint(x: 0.4, y: 8.9),
+                controlPoint1: NSPoint(x: -0.6, y: 8.6),
+                controlPoint2: NSPoint(x: 0.0, y: 9.0)
+            )
+            blade.curve(
+                to: NSPoint(x: 1.8, y: 8.3),
+                controlPoint1: NSPoint(x: 0.9, y: 8.9),
+                controlPoint2: NSPoint(x: 1.5, y: 8.7)
+            )
+            blade.curve(
+                to: NSPoint(x: 5.8, y: 5.1),
+                controlPoint1: NSPoint(x: 3.0, y: 7.8),
+                controlPoint2: NSPoint(x: 5.0, y: 6.2)
+            )
+            blade.curve(
+                to: NSPoint(x: 6.1, y: 4.2),
+                controlPoint1: NSPoint(x: 6.1, y: 4.8),
+                controlPoint2: NSPoint(x: 6.2, y: 4.4)
+            )
+            blade.curve(
+                to: NSPoint(x: 5.3, y: 3.6),
+                controlPoint1: NSPoint(x: 6.0, y: 3.9),
+                controlPoint2: NSPoint(x: 5.7, y: 3.6)
+            )
+            blade.curve(
+                to: NSPoint(x: 0.8, y: 1.2),
+                controlPoint1: NSPoint(x: 4.0, y: 3.3),
+                controlPoint2: NSPoint(x: 2.0, y: 1.8)
+            )
+            blade.close()
+            NSColor.windowBackgroundColor.setFill()
+            blade.fill()
+            NSColor.labelColor.withAlphaComponent(0.92).setStroke()
+            blade.lineWidth = 1
+            blade.lineJoinStyle = .round
+            blade.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        let hub = NSBezierPath(ovalIn: NSRect(
+            x: center.x - 2.1,
+            y: center.y - 2.1,
+            width: 4.2,
+            height: 4.2
+        ))
+        NSColor.windowBackgroundColor.setFill()
+        hub.fill()
+        NSColor.labelColor.withAlphaComponent(0.92).setStroke()
+        hub.lineWidth = 1.2
+        hub.stroke()
     }
 
     private static func statusRing(active: TrafficSignal) -> NSImage {
