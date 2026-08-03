@@ -176,7 +176,7 @@ enum SessionHistoryClient {
         }
 
         let messages = [
-            "{\"method\":\"initialize\",\"id\":0,\"params\":{\"clientInfo\":{\"name\":\"agent_pulse\",\"title\":\"Agent Pulse\",\"version\":\"2.7.0\"}}}",
+            "{\"method\":\"initialize\",\"id\":0,\"params\":{\"clientInfo\":{\"name\":\"agent_pulse\",\"title\":\"Agent Pulse\",\"version\":\"2.9.0\"}}}",
             "{\"method\":\"initialized\",\"params\":{}}"
         ].joined(separator: "\n") + "\n"
         input.fileHandleForWriting.write(Data(messages.utf8))
@@ -244,7 +244,7 @@ enum SessionHistoryClient {
             throw SessionHistoryError.launchFailed(error.localizedDescription)
         }
         let initialize = [
-            "{\"method\":\"initialize\",\"id\":0,\"params\":{\"clientInfo\":{\"name\":\"agent_pulse\",\"title\":\"Agent Pulse\",\"version\":\"2.7.0\"}}}",
+            "{\"method\":\"initialize\",\"id\":0,\"params\":{\"clientInfo\":{\"name\":\"agent_pulse\",\"title\":\"Agent Pulse\",\"version\":\"2.9.0\"}}}",
             "{\"method\":\"initialized\",\"params\":{}}"
         ].joined(separator: "\n") + "\n"
         input.fileHandleForWriting.write(Data(initialize.utf8))

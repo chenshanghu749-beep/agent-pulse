@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-enum AgentKind: String, CaseIterable, Equatable, Sendable {
+enum AgentKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
     case codex
     case cursor
 

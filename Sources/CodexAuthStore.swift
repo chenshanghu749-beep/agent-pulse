@@ -184,7 +184,9 @@ enum CodexAuthStore {
     }
 
     private static func configuredProviderKeys() -> Set<String> {
-        Set(ProviderStore.providers().compactMap { CredentialStore.load(providerID: $0.id) })
+        Set(ProviderStore.providers(for: .codex).compactMap {
+            CredentialStore.load(providerID: $0.id)
+        })
     }
 
     private static func sanitizedChatGPTAuth(_ data: Data) -> Data? {

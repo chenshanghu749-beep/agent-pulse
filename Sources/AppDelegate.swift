@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var route = RouteConfigManager.currentRoute()
     private var routeDisplayName = "OpenAI 官方"
     private var latestCodeUsage: UsageResponse?
+    private var latestProviderBalance: ProviderBalanceSnapshot?
     private var latestOfficialUsage: OfficialUsageSnapshot?
     private var latestCursorStatus = CursorStatus.unavailable
     private var latestCursorOfficialUsage: CursorOfficialUsageSnapshot?
@@ -71,13 +72,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusTitleText = ""
     private let iconAnimationStartUptime = ProcessInfo.processInfo.systemUptime
     private lazy var settings = SettingsWindowController(appDelegate: self)
-    private let chatCompletionsBridge = ChatCompletionsBridge()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         AppThemePreference.apply(AppThemePreference.selected)
+        CursorUsagePreference.officialUsageEnabled = true
+        CursorUsagePreference.providerID = nil
         installTextEditingCommands()
-        ensureChatCompletionsBridge()
         WidgetRegistration.ensureRegistered()
 
         do {
@@ -232,7 +233,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         taskActivityMonitor?.stop()
         iconAnimationTimer?.invalidate()
         startupChaseTimer?.invalidate()
-        chatCompletionsBridge.stop()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -251,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         latestError = nil
         lastUpdated = Date()
         latestCodeUsage = validatedCodeUsage
+        latestProviderBalance = nil
         latestOfficialUsage = nil
         startStartupChase()
         updateStatusTitle()
@@ -265,6 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         AgentPreference.selected = agent
         latestError = nil
         latestCodeUsage = nil
+        latestProviderBalance = nil
         latestOfficialUsage = nil
         latestCursorOfficialUsage = nil
         latestCursorProviderUsage = nil
@@ -318,14 +320,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = "检测到 Codex 的认证文件中残留了第三方 API Key，已将它安全移出官方认证。请在 Codex 中登录一次，后续切换会自动备份和恢复官方登录。"
         alert.addButton(withTitle: "知道了")
         alert.runModal()
-    }
-
-    func ensureChatCompletionsBridge() {
-        do {
-            try chatCompletionsBridge.start()
-        } catch {
-            latestError = error.localizedDescription
-        }
     }
 
     private func configureStatusButton() {
@@ -384,6 +378,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let provider = ProviderStore.provider(id: id)
             if provider?.isCodeAPI == true, let data = latestCodeUsage {
                 title = money(data.balance)
+            } else if let balance = latestProviderBalance {
+                title = compact(balance.displayText)
             } else {
                 title = compact(provider?.name ?? "第三方")
             }
@@ -651,6 +647,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         usageLabel = "提供商余额"
                         usageValue = money(usage.balance)
                         usageDetail = "今日费用 \(money(usage.usage.today.actualCost)) · \(number(usage.usage.today.totalTokens)) Token"
+                    } else if let balance = latestProviderBalance {
+                        usageLabel = balance.displayText.hasPrefix("配额") ? "提供商配额" : "提供商余额"
+                        usageValue = balance.displayText
+                            .replacingOccurrences(of: "余额 ", with: "")
+                            .replacingOccurrences(of: "配额 ", with: "")
+                        usageDetail = balance.detail
                     } else {
                         usageLabel = "当前模型"
                         usageValue = provider.model
@@ -757,8 +759,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     updateStatusTitle()
                     return
                 }
-                if provider.isCodeAPI { latestCodeUsage = try await CodeAPIClient.fetch(key: key) }
+                latestCodeUsage = nil
+                latestProviderBalance = nil
+                if provider.isCodeAPI {
+                    latestCodeUsage = try await CodeAPIClient.fetch(key: key)
+                } else if provider.effectiveVendor.supportsBalanceLookup {
+                    let managementKey = CredentialStore.load(
+                        providerID: ProviderBalanceClient.managementCredentialID(for: provider.id)
+                    )
+                    if provider.effectiveVendor != .xAI
+                        || (managementKey?.isEmpty == false && provider.balanceTeamID?.isEmpty == false) {
+                        latestProviderBalance = try? await ProviderBalanceClient.fetch(
+                            profile: provider,
+                            apiKey: key,
+                            managementKey: managementKey
+                        )
+                    }
+                }
             case .official:
+                latestProviderBalance = nil
                 latestOfficialUsage = try await OfficialUsageClient.fetch()
             }
             latestError = nil
@@ -869,9 +888,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         menu.addItem(info(provider.name, emphasis: true))
+        if let balance = latestProviderBalance {
+            menu.addItem(info(balance.displayText, emphasis: true))
+            menu.addItem(info(balance.detail))
+        }
         menu.addItem(info("模型  \(provider.model)"))
         menu.addItem(info("地址  \(provider.baseURL)"))
-        menu.addItem(info("该提供商未配置用量查询接口"))
+        if provider.effectiveVendor == .custom {
+            menu.addItem(info("该自定义提供商未配置用量查询接口"))
+        } else if provider.effectiveVendor == .miMo {
+            menu.addItem(info("余额请前往 MiMo 控制台查看"))
+        } else if latestProviderBalance == nil {
+            menu.addItem(info("余额或配额暂不可用"))
+        }
     }
 
     private func addOfficialUsageMenu(to menu: NSMenu) {

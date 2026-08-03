@@ -27,5 +27,9 @@ fi
   -ov \
   "$FINAL_DMG" >/dev/null
 
+for package in "$ROOT_DIR"/dist/Agent-Pulse-*.dmg; do
+  [[ "$package" == "$FINAL_DMG" ]] || /bin/rm -f "$package"
+done
+
 echo "$FINAL_DMG"
 /usr/bin/shasum -a 256 "$FINAL_DMG"

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-2.8.2-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-2.9.0-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -38,17 +38,19 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 | --- | --- |
 | Agent 切换 | 在 Codex 与 Cursor 之间选择、监控并快速启动 |
 | 路由切换 | 在 OpenAI 官方路由和多个自定义提供商之间快速切换 |
-| 用量展示 | 查看 OpenAI/Cursor 官方用量及 Cursor 对应的 CodeAPI 提供商余额 |
+| 提供商预设 | 内置 DeepSeek、智谱 AI、月之暗面、MiniMax、阶跃星辰、MiMo 与阿里百炼云，也支持自定义 |
+| 用量与仪表盘 | 集中查看当前 Agent、路由、任务状态、官方用量与支持查询的提供商余额 |
 | 任务状态 | 支持 Codex 日志与 Cursor Hooks；红色执行、黄色工具、绿色完成 |
+| 状态外观 | 多种菜单栏状态图标，使用紧凑的五列宫格快速预览和切换 |
 | 会话保持 | 不改写 Codex 或 Cursor 的会话数据库 |
 | 旧会话兼容 | 首次启动检测旧第三方会话，经用户确认后创建 OpenAI 兼容副本，并保留完整备份 |
 
-支持 Responses API，并可在本机将 DeepSeek 等 Chat Completions 接口转换为 Codex 所需协议。GPT‑5.6 第三方路由会自动应用 Responses Lite 兼容配置。提供商配置支持连接测试，可在启用前校验 Base URL、API Key、模型与协议。
+第三方路由统一通过厂商原生 Responses API 直连，不启动本地协议桥接服务。阿里百炼云预设可直接使用 Responses API；智谱 AI 的连接测试会按官方 Chat Completions 接口验证 API Key 与模型，但在智谱开放 Responses API 前不能作为 Codex 直连路由。所有提供商均可在启用前测试 Base URL、API Key 与模型。
 
 ## 使用方式
 
 1. 打开 Agent Pulse，选择 `Codex` 或 `Cursor`。
-2. Codex 可选择 OpenAI 官方路由，或配置第三方提供商并测试连接。
+2. Codex 可选择 OpenAI 官方路由，或添加预设/自定义提供商并测试连接。
 3. Cursor 继续在官方应用中管理模型和 API Key；Agent Pulse 可绑定一个已配置的提供商展示余额。
 4. 点击“应用并打开”。Agent Pulse 不会强制重启正在运行的 Cursor。
 
@@ -62,7 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-2.8.2.dmg`](dist/Agent-Pulse-2.8.2.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-2.9.0.dmg`](dist/Agent-Pulse-2.9.0.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -76,7 +78,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.8.2.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-2.9.0.dmg`。
 
 ## 隐私与安全
 
@@ -106,4 +108,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`2.8.2`
+当前版本：`2.9.0`

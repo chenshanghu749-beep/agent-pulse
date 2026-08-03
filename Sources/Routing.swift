@@ -58,7 +58,7 @@ enum RouteConfigManager {
         }
         return detectedRoute(
             in: content,
-            profiles: ProviderStore.providers(),
+            profiles: ProviderStore.providers(for: .codex),
             selectedProviderID: ProviderStore.selectedProviderID()
         )
     }
@@ -67,7 +67,7 @@ enum RouteConfigManager {
         guard let content = try? String(contentsOf: configURL, encoding: .utf8) else {
             return false
         }
-        let profiles = ProviderStore.providers()
+        let profiles = ProviderStore.providers(for: .codex)
         let selectedProviderID = ProviderStore.selectedProviderID()
         return needsUpgradeReconciliation(
             in: content,
@@ -154,7 +154,7 @@ enum RouteConfigManager {
             let existingProvider = topLevelProvider(in: existing)?.lowercased()
             let existingRoute = detectedRoute(
                 in: existing,
-                profiles: ProviderStore.providers(),
+                profiles: ProviderStore.providers(for: .codex),
                 selectedProviderID: ProviderStore.selectedProviderID()
             )
             if existingProvider == nil || existingRoute == .official {
@@ -179,7 +179,7 @@ enum RouteConfigManager {
                 let backup = directory.appendingPathComponent("config.toml.agent-pulse.bak")
                 try Data(existing.utf8).write(to: backup, options: .atomic)
             }
-            let profiles = ProviderStore.providers()
+            let profiles = ProviderStore.providers(for: .codex)
             let legacyProfile = ProviderStore.selectedProviderID().flatMap { ProviderStore.provider(id: $0) }
             let rendered = render(
                 existing,
@@ -215,7 +215,7 @@ enum RouteConfigManager {
     static func reconcileManagedProvidersIfNeeded() throws -> Bool {
         guard let content = try? String(contentsOf: configURL, encoding: .utf8),
               containsManagedBlock(content) else { return false }
-        let profiles = ProviderStore.providers()
+        let profiles = ProviderStore.providers(for: .codex)
         var requiredIDs = profiles.map { codexProviderID(for: $0.id) }
         if ProviderStore.selectedProviderID() != nil { requiredIDs.append(legacyManagedProviderID) }
         if profiles.contains(where: { $0.id == "codeapi" || $0.isCodeAPI }) { requiredIDs.append("codeapi") }
@@ -359,7 +359,9 @@ enum RouteConfigManager {
     }
 
     static func profile(forCodexProviderID providerID: String) -> ProviderProfile? {
-        ProviderStore.providers().first { codexProviderID(for: $0.id) == providerID.lowercased() }
+        ProviderStore.providers(for: .codex).first {
+            codexProviderID(for: $0.id) == providerID.lowercased()
+        }
     }
 
     private static func providerBlock(id: String, profile: ProviderProfile) -> String {
@@ -378,9 +380,6 @@ enum RouteConfigManager {
     }
 
     private static func activeBaseURL(for profile: ProviderProfile) -> String {
-        if profile.effectiveAPIFormat == .chatCompletions {
-            return ChatCompletionsBridge.baseURL(providerID: profile.id)
-        }
         if profile.isCodeAPI, !profile.normalizedBaseURL.lowercased().hasSuffix("/v1") {
             return profile.normalizedBaseURL + "/v1"
         }

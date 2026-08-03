@@ -14,6 +14,287 @@ private final class SettingsSidebarView: NSView {
     }
 }
 
+private final class SettingsPageView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+
+    override func makeBackingLayer() -> CALayer {
+        CAGradientLayer()
+    }
+
+    override func updateLayer() {
+        guard let gradient = layer as? CAGradientLayer else { return }
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        gradient.colors = dark
+            ? [NSColor(calibratedWhite: 0.095, alpha: 1).cgColor,
+               NSColor(calibratedWhite: 0.125, alpha: 1).cgColor]
+            : [NSColor.white.cgColor,
+               NSColor(calibratedWhite: 0.975, alpha: 1).cgColor]
+        gradient.startPoint = CGPoint(x: 0.15, y: 1)
+        gradient.endPoint = CGPoint(x: 0.95, y: 0)
+    }
+}
+
+private final class TasteCardView: NSBox {
+    var respondsToHover = false
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let next = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(next)
+        tracking = next
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard respondsToHover else { return }
+        animateHover(scale: 1.008, shadow: 0.12)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard respondsToHover else { return }
+        animateHover(scale: 1, shadow: 0.04)
+    }
+
+    private func animateHover(scale: CGFloat, shadow: Float) {
+        guard let layer else { return }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.18)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        layer.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
+        layer.shadowOpacity = shadow
+        CATransaction.commit()
+    }
+
+    func setSelectedAppearance(_ selected: Bool) {
+        borderWidth = selected ? 1.6 : 0.7
+        borderColor = selected
+            ? .labelColor
+            : NSColor(name: nil) { appearance in
+                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                    ? NSColor.white.withAlphaComponent(0.12)
+                    : NSColor.black.withAlphaComponent(0.10)
+            }
+    }
+}
+
+private class TasteActionButton: NSButton {
+    enum Role {
+        case primary
+        case secondary
+        case icon
+    }
+
+    var role: Role = .secondary {
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+    private var hovered = false
+    private var tracking: NSTrackingArea?
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        if role != .icon { size.width += 22 }
+        return size
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureAppearance()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureAppearance()
+    }
+
+    private func configureAppearance() {
+        isBordered = false
+        wantsLayer = true
+        font = .systemFont(ofSize: 12.5, weight: .semibold)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let next = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(next)
+        tracking = next
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovered = true
+        needsDisplay = true
+        animateScale(1.025)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        needsDisplay = true
+        animateScale(1)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        animateScale(0.965, duration: 0.08)
+        super.mouseDown(with: event)
+        animateScale(hovered ? 1.025 : 1, duration: 0.14)
+    }
+
+    override func updateLayer() {
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let accent = dark ? NSColor.white : NSColor.black
+        let foreground = dark ? NSColor.black : NSColor.white
+        layer?.cornerRadius = role == .icon ? 9 : 8
+        layer?.borderWidth = role == .primary ? 0 : 0.8
+        layer?.borderColor = (dark
+            ? NSColor.white.withAlphaComponent(hovered ? 0.34 : 0.16)
+            : NSColor.black.withAlphaComponent(hovered ? 0.28 : 0.13)).cgColor
+        switch role {
+        case .primary:
+            layer?.backgroundColor = accent.withAlphaComponent(hovered ? 0.84 : 1).cgColor
+            contentTintColor = foreground
+        case .secondary, .icon:
+            layer?.backgroundColor = (dark
+                ? NSColor.white.withAlphaComponent(hovered ? 0.13 : 0.06)
+                : NSColor.black.withAlphaComponent(hovered ? 0.08 : 0.025)).cgColor
+            contentTintColor = .labelColor
+        }
+        alphaValue = isEnabled ? 1 : 0.45
+    }
+
+    private func animateScale(_ scale: CGFloat, duration: CFTimeInterval = 0.16) {
+        guard let layer else { return }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        layer.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
+        CATransaction.commit()
+    }
+}
+
+private final class ProviderActionButton: TasteActionButton {
+    var providerID: String?
+    var representsOfficial = false
+}
+
+private final class VendorChoiceButton: NSButton {
+    var vendor: ProviderVendor = .custom
+    private var choiceSelected = false
+
+    override var wantsUpdateLayer: Bool { true }
+
+    func setChoiceSelected(_ selected: Bool) {
+        choiceSelected = selected
+        needsDisplay = true
+    }
+
+    override func updateLayer() {
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        layer?.cornerRadius = 12
+        layer?.borderWidth = choiceSelected ? 1.6 : 0.7
+        layer?.borderColor = choiceSelected
+            ? NSColor.labelColor.cgColor
+            : (dark ? NSColor.white.withAlphaComponent(0.12) : NSColor.black.withAlphaComponent(0.10)).cgColor
+        layer?.backgroundColor = choiceSelected
+            ? NSColor.labelColor.withAlphaComponent(dark ? 0.16 : 0.07).cgColor
+            : (dark ? NSColor(calibratedWhite: 0.17, alpha: 1) : NSColor.white).cgColor
+        contentTintColor = .labelColor
+    }
+}
+
+private final class StatusStyleButton: NSButton {
+    var style: StatusIconStyle = .trafficLight
+    private var choiceSelected = false
+    private var hovered = false
+    private var tracking: NSTrackingArea?
+
+    override var wantsUpdateLayer: Bool { true }
+
+    func setChoiceSelected(_ selected: Bool) {
+        choiceSelected = selected
+        needsDisplay = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let next = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(next)
+        tracking = next
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovered = true
+        needsDisplay = true
+        animateScale(1.015)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        needsDisplay = true
+        animateScale(1)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        animateScale(0.975, duration: 0.08)
+        super.mouseDown(with: event)
+        animateScale(hovered ? 1.015 : 1, duration: 0.14)
+    }
+
+    override func updateLayer() {
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        layer?.cornerRadius = 12
+        layer?.borderWidth = choiceSelected ? 1.6 : 0.7
+        layer?.borderColor = choiceSelected
+            ? NSColor.labelColor.cgColor
+            : (dark
+                ? NSColor.white.withAlphaComponent(0.12)
+                : NSColor.black.withAlphaComponent(0.10)).cgColor
+        layer?.backgroundColor = choiceSelected
+            ? NSColor.labelColor.withAlphaComponent(dark ? 0.16 : 0.07).cgColor
+            : (dark
+                ? NSColor(calibratedWhite: hovered ? 0.22 : 0.18, alpha: 1)
+                : NSColor(calibratedWhite: hovered ? 0.965 : 0.985, alpha: 1)).cgColor
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOffset = CGSize(width: 0, height: -2)
+        layer?.shadowRadius = hovered ? 8 : 4
+        layer?.shadowOpacity = hovered ? 0.10 : 0.03
+        contentTintColor = .labelColor
+    }
+
+    private func animateScale(_ scale: CGFloat, duration: CFTimeInterval = 0.16) {
+        guard let layer else { return }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        layer.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
+        CATransaction.commit()
+    }
+}
+
+private final class FlippedDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 enum AppTheme: String, CaseIterable {
     case system
     case light
@@ -52,14 +333,16 @@ enum AppThemePreference {
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
-    private enum Section: Int, CaseIterable {
-        case dashboard, route, providers, appearance, version
+    private enum Section: Int {
+        case dashboard, route, providerEditor, appearance, version
+
+        static let navigation: [Section] = [.dashboard, .route, .appearance, .version]
 
         var title: String {
             switch self {
             case .dashboard: return "仪表盘"
-            case .route: return "路由"
-            case .providers: return "提供商"
+            case .route: return "模型与路由"
+            case .providerEditor: return "提供商配置"
             case .appearance: return "状态与外观"
             case .version: return "版本"
             }
@@ -69,7 +352,7 @@ final class SettingsWindowController: NSWindowController {
             switch self {
             case .dashboard: return "chart.bar.xaxis"
             case .route: return "arrow.triangle.branch"
-            case .providers: return "server.rack"
+            case .providerEditor: return "server.rack"
             case .appearance: return "circle.lefthalf.filled"
             case .version: return "arrow.triangle.2.circlepath"
             }
@@ -81,7 +364,14 @@ final class SettingsWindowController: NSWindowController {
     private var selectedProviderID: String?
     private var pages: [Section: NSView] = [:]
     private var sidebarButtons: [Section: NSButton] = [:]
+    private var selectedSection = Section.dashboard
+    private var providerRows: [String: TasteCardView] = [:]
+    private var providerBalanceLabels: [String: NSTextField] = [:]
+    private var providerBalances: [String: String] = [:]
     private let pageHost = NSView()
+    private let modelListStack = NSStackView()
+    private let addProviderButton = TasteActionButton()
+    private let editorAgentLabel = NSTextField(labelWithString: "")
     private let dashboardAgentValue = NSTextField(labelWithString: "—")
     private let dashboardRouteValue = NSTextField(labelWithString: "—")
     private let dashboardTaskValue = NSTextField(labelWithString: "—")
@@ -92,7 +382,7 @@ final class SettingsWindowController: NSWindowController {
     private let dashboardUpdatedLabel = NSTextField(labelWithString: "等待首次刷新")
     private let dashboardVersionLabel = NSTextField(labelWithString: AppUpdateChecker.currentVersion)
     private let dashboardMessageLabel = NSTextField(wrappingLabelWithString: "运行状态正常")
-    private let dashboardRefreshButton = NSButton(title: "立即刷新", target: nil, action: nil)
+    private let dashboardRefreshButton = TasteActionButton(title: "立即刷新", target: nil, action: nil)
 
     private let agentControl = NSSegmentedControl(
         labels: AgentKind.allCases.map(\.displayName),
@@ -116,23 +406,35 @@ final class SettingsWindowController: NSWindowController {
     private let modelField = NSTextField()
     private let keyField = NSSecureTextField()
     private let protocolPopup = NSPopUpButton()
-    private let testProviderButton = NSButton(title: "测试连接", target: nil, action: nil)
-    private let iconStylePopup = NSPopUpButton()
-    private let themePopup = NSPopUpButton()
+    private let testProviderButton = TasteActionButton(title: "测试连接", target: nil, action: nil)
+    private var selectedVendor: ProviderVendor = .deepSeek
+    private var vendorButtons: [ProviderVendor: VendorChoiceButton] = [:]
+    private let customProviderFields = NSStackView()
+    private let providerPresetSummary = NSTextField(wrappingLabelWithString: "")
+    private let balanceCapabilityLabel = NSTextField(wrappingLabelWithString: "")
+    private let themeControl = NSSegmentedControl(
+        labels: AppTheme.allCases.map(\.displayName),
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private var statusStyleButtons: [StatusIconStyle: StatusStyleButton] = [:]
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
-    private let cursorModelsButton = NSButton(title: "打开模型设置", target: nil, action: nil)
-    private let confirmButton = NSButton(title: "应用并打开", target: nil, action: nil)
+    private let cursorModelsButton = TasteActionButton(title: "打开模型设置", target: nil, action: nil)
+    private let confirmButton = TasteActionButton(title: "应用并打开", target: nil, action: nil)
     private let currentVersionLabel = NSTextField(labelWithString: AppUpdateChecker.currentVersion)
     private let updateStatusLabel = NSTextField(wrappingLabelWithString: "尚未检查更新")
-    private let checkUpdateButton = NSButton(title: "检查更新", target: nil, action: nil)
-    private let openProjectButton = NSButton(title: "打开项目主页", target: nil, action: nil)
+    private let checkUpdateButton = TasteActionButton(title: "检查更新", target: nil, action: nil)
+    private let installUpdateButton = TasteActionButton(title: "立即更新", target: nil, action: nil)
+    private let openProjectButton = TasteActionButton(title: "打开项目主页", target: nil, action: nil)
+    private var availableUpdate: AppUpdateStatus?
     private weak var codexRouteCard: NSView?
     private weak var cursorRouteCard: NSView?
 
     init(appDelegate: AppDelegate) {
         self.appDelegate = appDelegate
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 940, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 760),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -145,7 +447,7 @@ final class SettingsWindowController: NSWindowController {
                 ? .windowBackgroundColor
                 : .white
         }
-        window.minSize = NSSize(width: 850, height: 650)
+        window.minSize = NSSize(width: 900, height: 680)
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
@@ -163,20 +465,44 @@ final class SettingsWindowController: NSWindowController {
         content.addSubview(sidebar)
 
         let appMark = NSImageView(image: NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: nil)!)
-        appMark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
-        appMark.contentTintColor = .labelColor
+        appMark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        appMark.contentTintColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .black : .white
+        }
+        let markBox = NSBox()
+        markBox.boxType = .custom
+        markBox.borderWidth = 0
+        markBox.cornerRadius = 9
+        markBox.fillColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white : .black
+        }
+        appMark.translatesAutoresizingMaskIntoConstraints = false
+        markBox.contentView?.addSubview(appMark)
+        NSLayoutConstraint.activate([
+            markBox.widthAnchor.constraint(equalToConstant: 34),
+            markBox.heightAnchor.constraint(equalToConstant: 34),
+            appMark.centerXAnchor.constraint(equalTo: markBox.contentView!.centerXAnchor),
+            appMark.centerYAnchor.constraint(equalTo: markBox.contentView!.centerYAnchor)
+        ])
         let appName = NSTextField(labelWithString: "Agent Pulse")
-        appName.font = .systemFont(ofSize: 14, weight: .semibold)
-        let appRow = NSStackView(views: [appMark, appName])
+        appName.font = displayFont(size: 15, weight: .semibold)
+        let appSubtitle = NSTextField(labelWithString: "Agent control center")
+        appSubtitle.font = .systemFont(ofSize: 10.5, weight: .regular)
+        appSubtitle.textColor = .secondaryLabelColor
+        let brandText = NSStackView(views: [appName, appSubtitle])
+        brandText.orientation = .vertical
+        brandText.alignment = .leading
+        brandText.spacing = 2
+        let appRow = NSStackView(views: [markBox, brandText])
         appRow.orientation = .horizontal
         appRow.alignment = .centerY
-        appRow.spacing = 9
+        appRow.spacing = 11
 
         let navigation = NSStackView()
         navigation.orientation = .vertical
         navigation.alignment = .leading
-        navigation.spacing = 4
-        for section in Section.allCases {
+        navigation.spacing = 6
+        for section in Section.navigation {
             let button = makeSidebarButton(section)
             sidebarButtons[section] = button
             navigation.addArrangedSubview(button)
@@ -190,7 +516,8 @@ final class SettingsWindowController: NSWindowController {
         sidebar.addSubview(sidebarStack)
         navigation.widthAnchor.constraint(equalTo: sidebarStack.widthAnchor).isActive = true
 
-        let main = NSView()
+        let main = SettingsPageView()
+        main.wantsLayer = true
         main.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(main)
 
@@ -204,8 +531,14 @@ final class SettingsWindowController: NSWindowController {
         confirmButton.target = self
         confirmButton.action = #selector(confirmSelection)
         confirmButton.keyEquivalent = "\r"
-        confirmButton.bezelStyle = .rounded
-        let cancelButton = NSButton(title: "取消", target: self, action: #selector(closeWindow))
+        confirmButton.role = .primary
+        confirmButton.font = .systemFont(ofSize: 13, weight: .semibold)
+        confirmButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        confirmButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
+        stylePrimaryButton()
+        let cancelButton = TasteActionButton(title: "取消", target: self, action: #selector(closeWindow))
+        cancelButton.role = .secondary
+        cancelButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
         let footer = NSStackView(views: [statusLabel, NSView(), cancelButton, confirmButton])
         footer.orientation = .horizontal
         footer.alignment = .centerY
@@ -222,10 +555,10 @@ final class SettingsWindowController: NSWindowController {
             sidebar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: content.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 210),
+            sidebar.widthAnchor.constraint(equalToConstant: 220),
 
-            sidebarStack.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 15),
-            sidebarStack.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -15),
+            sidebarStack.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 16),
+            sidebarStack.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -16),
             sidebarStack.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 52),
             sidebarStack.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -18),
 
@@ -243,8 +576,8 @@ final class SettingsWindowController: NSWindowController {
             footerLine.trailingAnchor.constraint(equalTo: main.trailingAnchor),
             footerLine.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
 
-            footer.leadingAnchor.constraint(equalTo: main.leadingAnchor, constant: 28),
-            footer.trailingAnchor.constraint(equalTo: main.trailingAnchor, constant: -28),
+            footer.leadingAnchor.constraint(equalTo: main.leadingAnchor, constant: 34),
+            footer.trailingAnchor.constraint(equalTo: main.trailingAnchor, constant: -34),
             footer.bottomAnchor.constraint(equalTo: main.bottomAnchor, constant: -17),
             footer.heightAnchor.constraint(greaterThanOrEqualToConstant: 30),
             statusLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 330)
@@ -253,10 +586,23 @@ final class SettingsWindowController: NSWindowController {
         configureControls()
         pages[.dashboard] = buildDashboardPage()
         pages[.route] = buildRoutePage()
-        pages[.providers] = buildProvidersPage()
+        pages[.providerEditor] = buildProvidersPage()
         pages[.appearance] = buildAppearancePage()
         pages[.version] = buildVersionPage()
+        pages.values.forEach { enableTextInteraction(in: $0) }
+        enableTextInteraction(in: footer)
         selectSection(.dashboard)
+    }
+
+    private func enableTextInteraction(in view: NSView) {
+        if let field = view as? NSTextField {
+            field.isSelectable = true
+            if !field.isEditable {
+                field.refusesFirstResponder = false
+                field.focusRingType = .none
+            }
+        }
+        view.subviews.forEach(enableTextInteraction)
     }
 
     private func configureControls() {
@@ -279,8 +625,17 @@ final class SettingsWindowController: NSWindowController {
         cursorOfficialUsageSwitch.action = #selector(cursorOfficialUsageChanged)
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdates)
+        installUpdateButton.target = self
+        installUpdateButton.action = #selector(installAvailableUpdate)
+        installUpdateButton.role = .primary
+        installUpdateButton.isHidden = true
         openProjectButton.target = self
         openProjectButton.action = #selector(openProjectPage)
+        openProjectButton.role = .secondary
+        checkUpdateButton.role = .secondary
+        [openProjectButton, checkUpdateButton, installUpdateButton].forEach {
+            $0.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        }
         routeDescription.textColor = .secondaryLabelColor
         routeDescription.font = .systemFont(ofSize: 12)
         routeDescription.isSelectable = true
@@ -292,74 +647,121 @@ final class SettingsWindowController: NSWindowController {
         baseURLField.placeholderString = "https://api.example.com"
         modelField.placeholderString = "例如：gpt-5.6-sol"
         keyField.placeholderString = "sk-…"
-        protocolPopup.addItems(withTitles: ProviderAPIFormat.allCases.map(\.displayName))
+        protocolPopup.addItem(withTitle: ProviderAPIFormat.responses.displayName)
         protocolPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 250).isActive = true
         testProviderButton.target = self
         testProviderButton.action = #selector(testProviderConnection)
+        testProviderButton.role = .secondary
+        testProviderButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        providerPresetSummary.font = .systemFont(ofSize: 11.5)
+        providerPresetSummary.textColor = .secondaryLabelColor
+        providerPresetSummary.maximumNumberOfLines = 2
+        providerPresetSummary.isSelectable = true
+        balanceCapabilityLabel.font = .systemFont(ofSize: 11.5)
+        balanceCapabilityLabel.textColor = .secondaryLabelColor
+        balanceCapabilityLabel.maximumNumberOfLines = 2
+        balanceCapabilityLabel.isSelectable = true
         cursorModelsButton.target = self
         cursorModelsButton.action = #selector(openCursorModels)
 
-        iconStylePopup.addItems(withTitles: StatusIconStyle.allCases.map(\.displayName))
-        for (index, style) in StatusIconStyle.allCases.enumerated() {
-            iconStylePopup.item(at: index)?.image = StatusIconRenderer.image(style: style, active: .green)
+        themeControl.target = self
+        themeControl.action = #selector(themeChanged)
+        for index in AppTheme.allCases.indices {
+            themeControl.setWidth(112, forSegment: index)
         }
-        iconStylePopup.target = self
-        iconStylePopup.action = #selector(iconStyleChanged)
-        iconStylePopup.widthAnchor.constraint(equalToConstant: 240).isActive = true
-
-        themePopup.addItems(withTitles: AppTheme.allCases.map(\.displayName))
-        themePopup.target = self
-        themePopup.action = #selector(themeChanged)
-        themePopup.widthAnchor.constraint(equalToConstant: 240).isActive = true
 
         dashboardRefreshButton.target = self
         dashboardRefreshButton.action = #selector(refreshDashboardData)
+        dashboardRefreshButton.role = .secondary
+        dashboardRefreshButton.imageHugsTitle = true
+        dashboardRefreshButton.imageScaling = .scaleProportionallyDown
+        dashboardRefreshButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+
+        addProviderButton.image = NSImage(
+            systemSymbolName: "plus",
+            accessibilityDescription: "添加提供商"
+        )?.withSymbolConfiguration(.init(pointSize: 13.5, weight: .semibold))
+        addProviderButton.toolTip = "添加提供商"
+        addProviderButton.target = self
+        addProviderButton.action = #selector(openAddProviderPage)
+        addProviderButton.role = .primary
+        addProviderButton.isBordered = false
+        addProviderButton.widthAnchor.constraint(equalToConstant: 46).isActive = true
+        addProviderButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+
+        cursorModelsButton.image = NSImage(
+            systemSymbolName: "arrow.up.right.square",
+            accessibilityDescription: "打开 Cursor Models 设置"
+        )
+        cursorModelsButton.imagePosition = .imageLeading
+        cursorModelsButton.imageHugsTitle = true
+        cursorModelsButton.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        cursorModelsButton.role = .secondary
+        cursorModelsButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+
+        styleSegmentedControls()
+
+        modelListStack.orientation = .vertical
+        modelListStack.alignment = .leading
+        modelListStack.distribution = .fill
+        modelListStack.spacing = 10
+
+        editorAgentLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        editorAgentLabel.textColor = .secondaryLabelColor
 
     }
 
     private func buildDashboardPage() -> NSView {
-        let metrics = NSStackView(views: [
-            metricCard(title: "当前 Agent", symbol: "terminal", value: dashboardAgentValue),
-            metricCard(title: "当前路由", symbol: "arrow.triangle.branch", value: dashboardRouteValue),
-            metricCard(
+        let metricCells = [
+            metricCell(title: "当前 Agent", symbol: "terminal", value: dashboardAgentValue),
+            metricCell(title: "当前路由", symbol: "arrow.triangle.branch", value: dashboardRouteValue),
+            metricCell(
                 title: "任务状态",
                 symbol: "circle.fill",
                 value: dashboardTaskValue,
                 iconView: dashboardTaskIndicator
             )
+        ]
+        let metrics = NSStackView(views: [
+            metricCells[0], verticalSeparator(),
+            metricCells[1], verticalSeparator(),
+            metricCells[2]
         ])
         metrics.orientation = .horizontal
-        metrics.alignment = .top
-        metrics.distribution = .fillEqually
-        metrics.spacing = 12
-        metrics.arrangedSubviews.forEach {
-            $0.heightAnchor.constraint(equalToConstant: 118).isActive = true
-        }
+        metrics.alignment = .centerY
+        metrics.spacing = 0
+        metricCells[0].widthAnchor.constraint(equalTo: metricCells[1].widthAnchor).isActive = true
+        metricCells[1].widthAnchor.constraint(equalTo: metricCells[2].widthAnchor).isActive = true
+        let metricsCard = card([padded(metrics, horizontal: 0, vertical: 0)])
+        metricsCard.heightAnchor.constraint(equalToConstant: 126).isActive = true
 
         dashboardUsageTitle.font = .systemFont(ofSize: 12, weight: .medium)
-        dashboardUsageTitle.textColor = .secondaryLabelColor
-        dashboardUsageValue.font = .monospacedDigitSystemFont(ofSize: 30, weight: .semibold)
+        dashboardUsageTitle.textColor = featureSecondaryColor()
+        dashboardUsageValue.font = displayFont(size: 36, weight: .bold)
+        dashboardUsageValue.textColor = featurePrimaryColor()
         dashboardUsageValue.maximumNumberOfLines = 1
         dashboardUsageValue.lineBreakMode = .byTruncatingTail
         dashboardUsageValue.isSelectable = true
         dashboardUsageDetail.font = .systemFont(ofSize: 12)
-        dashboardUsageDetail.textColor = .secondaryLabelColor
+        dashboardUsageDetail.textColor = featureSecondaryColor()
         dashboardUsageDetail.maximumNumberOfLines = 2
         dashboardUsageDetail.isSelectable = true
         let usageText = NSStackView(views: [dashboardUsageTitle, dashboardUsageValue, dashboardUsageDetail])
         usageText.orientation = .vertical
         usageText.alignment = .leading
-        usageText.spacing = 7
+        usageText.spacing = 8
         let usageSymbol = NSImageView(image: NSImage(
             systemSymbolName: "chart.line.uptrend.xyaxis",
             accessibilityDescription: nil
         )!)
-        usageSymbol.symbolConfiguration = .init(pointSize: 24, weight: .regular)
-        usageSymbol.contentTintColor = .secondaryLabelColor
+        usageSymbol.symbolConfiguration = .init(pointSize: 32, weight: .light)
+        usageSymbol.contentTintColor = featureSecondaryColor()
         let usageRow = NSStackView(views: [usageText, NSView(), usageSymbol])
         usageRow.orientation = .horizontal
         usageRow.alignment = .centerY
-        usageRow.spacing = 16
+        usageRow.spacing = 22
+        let usageCard = featureCard([padded(usageRow, horizontal: 24, vertical: 21)])
+        usageCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 138).isActive = true
 
         dashboardUpdatedLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         dashboardUpdatedLabel.textColor = .secondaryLabelColor
@@ -369,30 +771,41 @@ final class SettingsWindowController: NSWindowController {
         dashboardMessageLabel.font = .systemFont(ofSize: 12)
         dashboardMessageLabel.maximumNumberOfLines = 2
         dashboardMessageLabel.isSelectable = true
+        dashboardRefreshButton.image = NSImage(
+            systemSymbolName: "arrow.clockwise",
+            accessibilityDescription: "立即刷新"
+        )?.withSymbolConfiguration(.init(pointSize: 12.5, weight: .semibold))
+        dashboardRefreshButton.image?.isTemplate = true
+        dashboardRefreshButton.imagePosition = .imageLeading
+        dashboardRefreshButton.imageHugsTitle = true
+        dashboardRefreshButton.imageScaling = .scaleProportionallyDown
 
         return page(
             title: "仪表盘",
-            subtitle: "查看当前 Agent、模型路由、用量和任务状态。",
+            subtitle: "在一个清晰的视图中掌握 Agent、路由、用量与任务进度。",
             cards: [
-                metrics,
-                card([padded(usageRow, horizontal: 20, vertical: 18)]),
+                metricsCard,
+                usageCard,
                 card([
                     settingRow(
-                        title: "数据刷新",
-                        detail: "用量每分钟自动更新，也可以立即刷新。",
-                        control: dashboardRefreshButton
+                        title: "运行状态",
+                        detail: "连接、鉴权与状态同步反馈。",
+                        control: dashboardMessageLabel
                     ),
                     separator(),
                     settingRow(title: "最近更新", detail: "仪表盘数据更新时间。", control: dashboardUpdatedLabel),
                     separator(),
-                    settingRow(title: "当前版本", detail: "已安装的 Agent Pulse 版本。", control: dashboardVersionLabel)
-                ]),
-                card([padded(dashboardMessageLabel, horizontal: 18, vertical: 13)])
+                    settingRow(
+                        title: "Agent Pulse \(AppUpdateChecker.currentVersion)",
+                        detail: "用量每分钟自动更新，也可以立即刷新。",
+                        control: dashboardRefreshButton
+                    )
+                ], interactive: true)
             ]
         )
     }
 
-    private func metricCard(
+    private func metricCell(
         title: String,
         symbol: String,
         value: NSTextField,
@@ -417,91 +830,555 @@ final class SettingsWindowController: NSWindowController {
         content.orientation = .vertical
         content.alignment = .leading
         content.spacing = 11
-        return card([padded(content, horizontal: 16, vertical: 15)])
+        return padded(content, horizontal: 20, vertical: 17)
     }
 
     private func buildRoutePage() -> NSView {
         let agentRow = settingRow(
             title: "Agent",
-            detail: "选择要监控和启动的本地开发 Agent。",
+            detail: "模型列表会随 Agent 切换，每个配置只出现在绑定的 Agent 下。",
             control: agentControl
         )
-        let routeRow = settingRow(
-            title: "模型来源",
-            detail: "选择 OpenAI 官方账号或自定义模型提供商。",
-            control: routeControl
-        )
-        let providerRow = settingRow(
-            title: "第三方提供商",
-            detail: "切换时会重新启动 Codex，并保留本地会话的原始记录。",
-            control: routeProviderPopup
-        )
-        let historyRow = settingRow(
-            title: "会话记录",
-            detail: "所有路由显示同一份历史；会话内容不会被复制、归档或删除。",
-            control: NSTextField(labelWithString: "始终保留")
-        )
-        let cursorRow = settingRow(
-            title: "Cursor BYOK",
-            detail: "API Key 与模型由 Cursor 官方 Models 设置管理，Agent Pulse 不读取或改写 Cursor 会话数据库。",
-            control: cursorModelsButton
-        )
-        let cursorOfficialUsageRow = settingRow(
-            title: "官方用量",
-            detail: "允许读取 Cursor 本地登录状态并查询官方剩余额度；登录令牌只在内存中使用，不会保存。",
-            control: cursorOfficialUsageSwitch
-        )
-        let cursorBalanceRow = settingRow(
-            title: "提供商余额",
-            detail: "选择 Agent Pulse 中已配置的提供商。CodeAPI 可显示余额，其他提供商显示名称与模型。",
-            control: cursorBalanceProviderPopup
-        )
-        let codexCard = card([routeRow, separator(), providerRow, separator(), historyRow])
-        let cursorCard = card([
-            cursorOfficialUsageRow,
-            separator(),
-            cursorBalanceRow,
-            separator(),
-            cursorRow
+
+        let document = FlippedDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        modelListStack.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(modelListStack)
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = document
+        NSLayoutConstraint.activate([
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            document.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+            modelListStack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            modelListStack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            modelListStack.topAnchor.constraint(equalTo: document.topAnchor),
+            modelListStack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 390)
         ])
-        codexRouteCard = codexCard
-        cursorRouteCard = cursorCard
+
         return page(
-            title: "路由",
-            subtitle: "选择 Agent，以及它使用的模型来源。",
+            title: "模型与路由",
+            subtitle: "选择 Agent，管理 Agent Pulse 当前能够连接的模型与路由。",
+            headerAccessory: addProviderButton,
             cards: [
-                card([agentRow]),
-                codexCard,
-                cursorCard
+                card([agentRow], interactive: true),
+                scroll
             ]
         )
     }
 
+    private func reloadModelList() {
+        modelListStack.arrangedSubviews.forEach {
+            modelListStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        providerRows.removeAll(keepingCapacity: true)
+        providerBalanceLabels.removeAll(keepingCapacity: true)
+
+        let agent = selectedAgent()
+        addProviderButton.isHidden = agent == .cursor
+        let official = makeModelRow(provider: nil, agent: agent)
+        modelListStack.addArrangedSubview(official)
+        official.widthAnchor.constraint(equalTo: modelListStack.widthAnchor).isActive = true
+
+        if agent == .cursor {
+            let guidance = makeCursorManagementCard()
+            modelListStack.addArrangedSubview(guidance)
+            guidance.widthAnchor.constraint(equalTo: modelListStack.widthAnchor).isActive = true
+            addModelListSpacer()
+            return
+        }
+
+        let visibleProviders = providers.filter { $0.supports(.codex) }
+        for provider in visibleProviders {
+            let row = makeModelRow(provider: provider, agent: agent)
+            modelListStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: modelListStack.widthAnchor).isActive = true
+        }
+        addModelListSpacer()
+        refreshProviderBalances(visibleProviders, agent: agent)
+    }
+
+    private func addModelListSpacer() {
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        modelListStack.addArrangedSubview(spacer)
+        spacer.widthAnchor.constraint(equalTo: modelListStack.widthAnchor).isActive = true
+        spacer.heightAnchor.constraint(greaterThanOrEqualToConstant: 1).isActive = true
+    }
+
+    private func makeCursorManagementCard() -> TasteCardView {
+        let card = TasteCardView()
+        card.boxType = .custom
+        card.respondsToHover = true
+        card.cornerRadius = 14
+        card.borderWidth = 0.7
+        card.borderColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.white.withAlphaComponent(0.12)
+                : NSColor.black.withAlphaComponent(0.10)
+        }
+        card.fillColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.145, alpha: 1)
+                : .white
+        }
+
+        let icon = NSImageView(image: NSImage(
+            systemSymbolName: "slider.horizontal.3",
+            accessibilityDescription: nil
+        )!)
+        icon.symbolConfiguration = .init(pointSize: 17, weight: .medium)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.widthAnchor.constraint(equalToConstant: 30).isActive = true
+
+        let title = NSTextField(labelWithString: "第三方模型由 Cursor 管理")
+        title.font = displayFont(size: 14, weight: .semibold)
+        let detail = NSTextField(wrappingLabelWithString:
+            "Agent Pulse 目前支持 Cursor 官方用量与任务状态；自定义模型请前往 Cursor Settings → Models 配置。"
+        )
+        detail.font = .systemFont(ofSize: 11.5)
+        detail.textColor = .secondaryLabelColor
+        detail.maximumNumberOfLines = 2
+        let text = NSStackView(views: [title, detail])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 5
+
+        let content = NSStackView(views: [icon, text, NSView(), cursorModelsButton])
+        content.orientation = .horizontal
+        content.alignment = .centerY
+        content.spacing = 13
+        content.translatesAutoresizingMaskIntoConstraints = false
+        card.contentView?.addSubview(content)
+        NSLayoutConstraint.activate([
+            card.heightAnchor.constraint(equalToConstant: 92),
+            content.leadingAnchor.constraint(equalTo: card.contentView!.leadingAnchor, constant: 18),
+            content.trailingAnchor.constraint(equalTo: card.contentView!.trailingAnchor, constant: -16),
+            content.topAnchor.constraint(equalTo: card.contentView!.topAnchor, constant: 14),
+            content.bottomAnchor.constraint(equalTo: card.contentView!.bottomAnchor, constant: -14)
+        ])
+        return card
+    }
+
+    private func makeModelRow(provider: ProviderProfile?, agent: AgentKind) -> TasteCardView {
+        let key = provider?.id ?? "official"
+        let row = TasteCardView()
+        row.boxType = .custom
+        row.respondsToHover = true
+        row.wantsLayer = true
+        row.cornerRadius = 14
+        row.fillColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.145, alpha: 1)
+                : .white
+        }
+        row.setSelectedAppearance(isModelSelected(key, agent: agent))
+        row.heightAnchor.constraint(equalToConstant: 80).isActive = true
+        providerRows[key] = row
+
+        let icon = routeIconView(provider: provider, agent: agent)
+
+        let name = NSTextField(labelWithString: provider?.name ?? officialProviderName(for: agent))
+        name.font = displayFont(size: 14, weight: .semibold)
+        name.lineBreakMode = .byTruncatingTail
+        let model = NSTextField(labelWithString: provider?.model ?? officialModelDescription(for: agent))
+        model.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        model.textColor = .secondaryLabelColor
+        model.lineBreakMode = .byTruncatingMiddle
+        let identity = NSStackView(views: [name, model])
+        identity.orientation = .vertical
+        identity.alignment = .leading
+        identity.spacing = 5
+        identity.widthAnchor.constraint(greaterThanOrEqualToConstant: 210).isActive = true
+        let left = NSStackView(views: [icon, identity])
+        left.orientation = .horizontal
+        left.alignment = .centerY
+        left.spacing = 12
+
+        let balance = NSTextField(labelWithString: balanceText(for: provider, agent: agent))
+        balance.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
+        balance.textColor = .labelColor
+        balance.alignment = .right
+        balance.widthAnchor.constraint(greaterThanOrEqualToConstant: 88).isActive = true
+        if let provider { providerBalanceLabels[provider.id] = balance }
+
+        let testButton = modelActionButton(
+            symbol: "bolt.horizontal.circle",
+            toolTip: "测试连接",
+            action: #selector(testModelRow(_:)),
+            provider: provider
+        )
+        let selectButton = modelActionButton(
+            symbol: isModelSelected(key, agent: agent) ? "checkmark.circle.fill" : "checkmark.circle",
+            toolTip: "选择模型",
+            action: #selector(selectModelRow(_:)),
+            provider: provider
+        )
+        var actionViews: [NSView] = [balance, testButton]
+        if let provider {
+            let editButton = modelActionButton(
+                symbol: "pencil",
+                toolTip: "编辑提供商",
+                action: #selector(editModelRow(_:)),
+                provider: provider
+            )
+            actionViews.append(editButton)
+            let deleteButton = modelActionButton(
+                symbol: "trash",
+                toolTip: "删除提供商",
+                action: #selector(deleteModelRow(_:)),
+                provider: provider
+            )
+            actionViews.append(deleteButton)
+        }
+        actionViews.append(selectButton)
+        let actions = NSStackView(views: actionViews)
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 7
+
+        let content = NSStackView(views: [left, NSView(), actions])
+        content.orientation = .horizontal
+        content.alignment = .centerY
+        content.spacing = 16
+        content.translatesAutoresizingMaskIntoConstraints = false
+        row.contentView?.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: row.contentView!.leadingAnchor, constant: 18),
+            content.trailingAnchor.constraint(equalTo: row.contentView!.trailingAnchor, constant: -14),
+            content.topAnchor.constraint(equalTo: row.contentView!.topAnchor, constant: 12),
+            content.bottomAnchor.constraint(equalTo: row.contentView!.bottomAnchor, constant: -12)
+        ])
+        return row
+    }
+
+    private func modelActionButton(
+        symbol: String,
+        toolTip: String,
+        action: Selector,
+        provider: ProviderProfile?
+    ) -> ProviderActionButton {
+        let button = ProviderActionButton()
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: toolTip)
+        button.toolTip = toolTip
+        button.target = self
+        button.action = action
+        button.providerID = provider?.id
+        button.representsOfficial = provider == nil
+        button.role = .icon
+        button.widthAnchor.constraint(equalToConstant: 32).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        return button
+    }
+
+    private func routeIconView(provider: ProviderProfile?, agent: AgentKind) -> NSView {
+        let image: NSImage
+        if let provider {
+            if let logo = vendorLogoImage(provider.effectiveVendor) {
+                image = logo
+            } else {
+                image = NSImage(
+                    systemSymbolName: provider.effectiveVendor == .custom
+                        ? "slider.horizontal.3"
+                        : provider.effectiveVendor.symbolName,
+                    accessibilityDescription: provider.name
+                ) ?? NSImage(systemSymbolName: "server.rack", accessibilityDescription: provider.name)!
+            }
+        } else {
+            let applicationURL = agent == .codex
+                ? NSWorkspace.shared.urlForApplication(withBundleIdentifier: CodexLauncher.bundleIdentifier)
+                : CursorLauncher.applicationURL()
+            if let applicationURL {
+                image = NSWorkspace.shared.icon(forFile: applicationURL.path)
+            } else {
+                image = NSImage(
+                    systemSymbolName: agent == .codex ? "terminal.fill" : "cursorarrow.rays",
+                    accessibilityDescription: agent.displayName
+                )!
+            }
+        }
+        image.size = NSSize(width: 23, height: 23)
+
+        let imageView = NSImageView(image: image)
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.contentTintColor = .labelColor
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSBox()
+        container.boxType = .custom
+        container.borderWidth = 0.7
+        container.borderColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.white.withAlphaComponent(0.12)
+                : NSColor.black.withAlphaComponent(0.10)
+        }
+        container.cornerRadius = 10
+        container.fillColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.white.withAlphaComponent(0.055)
+                : NSColor.black.withAlphaComponent(0.025)
+        }
+        container.contentView?.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: 38),
+            container.heightAnchor.constraint(equalToConstant: 38),
+            imageView.widthAnchor.constraint(equalToConstant: 23),
+            imageView.heightAnchor.constraint(equalToConstant: 23),
+            imageView.centerXAnchor.constraint(equalTo: container.contentView!.centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: container.contentView!.centerYAnchor)
+        ])
+        return container
+    }
+
+    private func officialProviderName(for agent: AgentKind) -> String {
+        agent == .codex ? "OpenAI 官方" : "Cursor 官方"
+    }
+
+    private func officialModelDescription(for agent: AgentKind) -> String {
+        agent == .codex ? (ProviderStore.officialModel() ?? "ChatGPT 登录模型") : "Cursor 官方模型"
+    }
+
+    private func balanceText(for provider: ProviderProfile?, agent: AgentKind) -> String {
+        guard let provider else {
+            if agent == .cursor && AgentPreference.selected != .cursor {
+                return "应用后读取"
+            }
+            guard AgentPreference.selected == agent,
+                  let snapshot = appDelegate?.dashboardSnapshot(),
+                  snapshot.usageLabel.contains("官方") else { return "余额 —" }
+            return "余额 \(snapshot.usageValue)"
+        }
+        if let value = providerBalances[provider.id] { return value }
+        switch provider.effectiveVendor {
+        case .zhipuAI, .miniMax: return "配额读取中"
+        case .miMo: return "余额 控制台查看"
+        case .custom: return provider.isCodeAPI ? "余额读取中" : "余额 —"
+        default: return "余额读取中"
+        }
+    }
+
+    private func isModelSelected(_ key: String, agent: AgentKind) -> Bool {
+        if agent == .codex {
+            if key == "official" { return routeControl.selectedSegment == 0 }
+            return routeControl.selectedSegment == 1 && selectedProviderID == key
+        }
+        return key == "official"
+    }
+
+    private func refreshProviderBalances(_ visibleProviders: [ProviderProfile], agent: AgentKind) {
+        for provider in visibleProviders where providerBalances[provider.id] == nil {
+            if !provider.effectiveVendor.supportsBalanceLookup && !provider.isCodeAPI { continue }
+            guard let key = CredentialStore.load(providerID: provider.id), !key.isEmpty else {
+                providerBalances[provider.id] = "余额 未配置"
+                providerBalanceLabels[provider.id]?.stringValue = "余额 未配置"
+                continue
+            }
+            let loadingText: String
+            switch provider.effectiveVendor {
+            case .zhipuAI, .miniMax: loadingText = "配额读取中"
+            default: loadingText = "余额读取中"
+            }
+            providerBalances[provider.id] = loadingText
+            providerBalanceLabels[provider.id]?.stringValue = loadingText
+            Task {
+                do {
+                    let managementKey = CredentialStore.load(
+                        providerID: ProviderBalanceClient.managementCredentialID(for: provider.id)
+                    )
+                    let snapshot = try await ProviderBalanceClient.fetch(
+                        profile: provider,
+                        apiKey: key,
+                        managementKey: managementKey
+                    )
+                    providerBalances[provider.id] = snapshot.displayText
+                    guard selectedAgent() == agent else { return }
+                    providerBalanceLabels[provider.id]?.stringValue = snapshot.displayText
+                } catch {
+                    let unavailable = provider.effectiveVendor == .zhipuAI || provider.effectiveVendor == .miniMax
+                        ? "配额不可用" : "余额不可用"
+                    providerBalances[provider.id] = unavailable
+                    guard selectedAgent() == agent else { return }
+                    providerBalanceLabels[provider.id]?.stringValue = unavailable
+                    providerBalanceLabels[provider.id]?.toolTip = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    @objc private func selectModelRow(_ sender: ProviderActionButton) {
+        let agent = selectedAgent()
+        if agent == .cursor {
+            selectedProviderID = nil
+            cursorOfficialUsageSwitch.state = .on
+            reloadModelList()
+            statusLabel.stringValue = "Cursor 已使用官方连接；自定义模型请在 Cursor Models 中配置。"
+            return
+        }
+        if sender.representsOfficial {
+            selectedProviderID = nil
+            routeControl.selectedSegment = 0
+        } else if let id = sender.providerID {
+            selectedProviderID = id
+            routeControl.selectedSegment = 1
+        }
+        reloadProviderPopups()
+        reloadModelList()
+        statusLabel.stringValue = "已选择模型，点击“应用并打开”使配置生效。"
+    }
+
+    @objc private func testModelRow(_ sender: ProviderActionButton) {
+        sender.isEnabled = false
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.stringValue = "正在测试连接…"
+        let agent = selectedAgent()
+        Task {
+            defer { sender.isEnabled = true }
+            do {
+                if sender.representsOfficial {
+                    if agent == .codex {
+                        let usage = try await OfficialUsageClient.fetch()
+                        guard usage.isLoggedIn else { throw SettingsError.officialNotLoggedIn }
+                    } else {
+                        _ = try await CursorOfficialUsageClient.fetch()
+                    }
+                    showSuccess("\(officialProviderName(for: agent))连接正常。")
+                    return
+                }
+                guard let id = sender.providerID,
+                      let provider = providers.first(where: { $0.id == id }),
+                      let key = CredentialStore.load(providerID: id), !key.isEmpty else {
+                    throw SettingsError.missingCredential
+                }
+                let result = try await ProviderConnectionTester.test(profile: provider, key: key)
+                showSuccess(result)
+            } catch {
+                showError(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc private func editModelRow(_ sender: ProviderActionButton) {
+        guard let id = sender.providerID else { return }
+        selectedProviderID = id
+        reloadProviderPopups()
+        loadSelectedProvider()
+        editorAgentLabel.stringValue = selectedAgent().displayName
+        selectSection(.providerEditor)
+    }
+
+    @objc private func deleteModelRow(_ sender: ProviderActionButton) {
+        guard let id = sender.providerID else { return }
+        selectedProviderID = id
+        deleteProvider()
+    }
+
+    @objc private func openAddProviderPage() {
+        guard selectedAgent() == .codex else {
+            statusLabel.stringValue = "Cursor 的第三方模型请在 Cursor Models 中配置。"
+            return
+        }
+        addProvider()
+        editorAgentLabel.stringValue = selectedAgent().displayName
+        selectSection(.providerEditor)
+        window?.makeFirstResponder(nameField)
+    }
+
+    @objc private func returnToModelList() {
+        reloadModelList()
+        selectSection(.route)
+    }
+
     private func buildProvidersPage() -> NSView {
-        let addButton = NSButton(title: "新增", target: self, action: #selector(addProvider))
-        let deleteButton = NSButton(title: "删除", target: self, action: #selector(deleteProvider))
-        let picker = NSStackView(views: [providerPopup, addButton, deleteButton])
-        picker.orientation = .horizontal
-        picker.spacing = 8
-        let providerRow = settingRow(
-            title: "配置",
-            detail: "保存多个提供商，并在模型路由中选择使用。",
-            control: picker
+        let backButton = TasteActionButton()
+        backButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "返回模型列表")
+        backButton.toolTip = "返回模型列表"
+        backButton.target = self
+        backButton.action = #selector(returnToModelList)
+        backButton.role = .icon
+        backButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        backButton.widthAnchor.constraint(equalToConstant: 34).isActive = true
+        let deleteButton = TasteActionButton()
+        deleteButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "删除提供商")
+        deleteButton.toolTip = "删除提供商"
+        deleteButton.target = self
+        deleteButton.action = #selector(deleteProvider)
+        deleteButton.role = .icon
+        deleteButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        deleteButton.widthAnchor.constraint(equalToConstant: 34).isActive = true
+        let headerActions = NSStackView(views: [deleteButton, backButton])
+        headerActions.orientation = .horizontal
+        headerActions.alignment = .centerY
+        headerActions.spacing = 8
+        let agentRow = settingRow(
+            title: "绑定 Agent",
+            detail: "保存后只会出现在当前 Agent 的模型列表中。",
+            control: editorAgentLabel
         )
 
-        let form = NSGridView(views: [
-            [fieldLabel("名称"), nameField],
-            [fieldLabel("Base URL"), baseURLField],
-            [fieldLabel("模型 ID"), modelField],
-            [fieldLabel("API 协议"), protocolPopup],
-            [fieldLabel("API Key"), keyField]
+        vendorButtons.removeAll(keepingCapacity: true)
+        let choices = ProviderVendor.presetChoices.map(makeVendorChoiceButton)
+        let vendorGrid = NSGridView(views: stride(from: 0, to: choices.count, by: 4).map { index in
+            (0..<4).map { offset in
+                index + offset < choices.count ? choices[index + offset] : NSView()
+            }
+        })
+        let vendorCells: [NSView] = choices
+        for cell in vendorCells.dropFirst() {
+            cell.widthAnchor.constraint(equalTo: vendorCells[0].widthAnchor).isActive = true
+        }
+        vendorGrid.rowSpacing = 12
+        vendorGrid.columnSpacing = 12
+        for index in 0..<4 { vendorGrid.column(at: index).xPlacement = .fill }
+        for index in 0..<vendorGrid.numberOfRows { vendorGrid.row(at: index).yPlacement = .fill }
+        let vendorHeading = sectionHeading(
+            title: "选择厂商",
+            detail: "预设已内置服务地址与推荐模型；图标靠左排列，选中项使用黑白高对比边框。"
+        )
+        let vendorSection = NSStackView(views: [vendorHeading, vendorGrid])
+        vendorSection.orientation = .vertical
+        vendorSection.alignment = .leading
+        vendorSection.spacing = 16
+        vendorGrid.widthAnchor.constraint(equalTo: vendorSection.widthAnchor).isActive = true
+
+        let commonForm = makeEditorGrid([
+            ("配置名", nameField),
+            ("模型 ID", modelField),
+            ("API Key", keyField)
         ])
-        form.rowSpacing = 13
-        form.columnSpacing = 16
-        form.column(at: 0).xPlacement = .trailing
-        form.column(at: 1).xPlacement = .fill
-        let formContainer = padded(form, horizontal: 18, vertical: 17)
-        let saveButton = NSButton(title: "保存提供商", target: self, action: #selector(saveProvider))
+        nameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+
+        let customGrid = makeEditorGrid([
+            ("Base URL", baseURLField)
+        ])
+        customProviderFields.orientation = .vertical
+        customProviderFields.alignment = .leading
+        customProviderFields.spacing = 12
+        customProviderFields.addArrangedSubview(separator())
+        customProviderFields.addArrangedSubview(customGrid)
+        customGrid.widthAnchor.constraint(equalTo: customProviderFields.widthAnchor).isActive = true
+
+        let form = NSStackView(views: [
+            commonForm,
+            providerPresetSummary,
+            customProviderFields,
+            balanceCapabilityLabel
+        ])
+        form.orientation = .vertical
+        form.alignment = .leading
+        form.spacing = 13
+        commonForm.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true
+        providerPresetSummary.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true
+        customProviderFields.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true
+        balanceCapabilityLabel.widthAnchor.constraint(equalTo: form.widthAnchor).isActive = true
+        let formContainer = padded(form, horizontal: 24, vertical: 21)
+        let saveButton = TasteActionButton(title: "保存提供商", target: self, action: #selector(saveProvider))
+        saveButton.role = .primary
+        saveButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
         let actions = NSStackView(views: [testProviderButton, saveButton])
         actions.orientation = .horizontal
         actions.spacing = 8
@@ -511,33 +1388,238 @@ final class SettingsWindowController: NSWindowController {
             control: actions
         )
         return page(
-            title: "提供商",
-            subtitle: "配置 Responses 服务，或通过本地桥接使用 DeepSeek 等 Chat Completions 服务。",
-            cards: [card([providerRow]), card([formContainer, separator(), footer])]
+            title: "提供商配置",
+            subtitle: "配置模型地址、协议和本地凭据，然后返回模型列表启用。",
+            headerAccessory: headerActions,
+            cards: [
+                card([agentRow], interactive: true),
+                card([padded(vendorSection, horizontal: 24, vertical: 21)], interactive: true),
+                card([formContainer, separator(), footer], interactive: true)
+            ]
         )
+    }
+
+    private func makeVendorChoiceButton(_ vendor: ProviderVendor) -> VendorChoiceButton {
+        let button = VendorChoiceButton()
+        button.vendor = vendor
+        button.title = vendor.displayName
+        let image: NSImage?
+        if let logo = vendorLogoImage(vendor) {
+            image = logo
+        } else {
+            let symbol = NSImage(systemSymbolName: vendor.symbolName, accessibilityDescription: vendor.displayName)
+            image = symbol?.withSymbolConfiguration(.init(pointSize: 15, weight: .semibold))
+        }
+        button.image = image.map { vendorImageWithLeadingPadding($0) }
+        button.imagePosition = .imageLeading
+        button.imageHugsTitle = true
+        button.alignment = .left
+        button.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        button.isBordered = false
+        button.wantsLayer = true
+        button.target = self
+        button.action = #selector(vendorChoiceChanged(_:))
+        button.heightAnchor.constraint(equalToConstant: 62).isActive = true
+        vendorButtons[vendor] = button
+        return button
+    }
+
+    private func vendorImageWithLeadingPadding(_ source: NSImage) -> NSImage {
+        let padding: CGFloat = 20
+        let height = max(18, source.size.height)
+        return NSImage(
+            size: NSSize(width: source.size.width + padding, height: height),
+            flipped: false
+        ) { _ in
+            source.draw(
+                in: NSRect(
+                    x: padding,
+                    y: (height - source.size.height) / 2,
+                    width: source.size.width,
+                    height: source.size.height
+                ),
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1
+            )
+            return true
+        }
+    }
+
+    private func vendorLogoImage(_ vendor: ProviderVendor) -> NSImage? {
+        guard let resourceName = vendor.logoResourceName,
+              let url = Bundle.main.url(
+                forResource: resourceName,
+                withExtension: "svg",
+                subdirectory: "VendorIcons"
+              ),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.size = vendor == .miMo
+            ? NSSize(width: 28, height: 12)
+            : NSSize(width: 18, height: 18)
+        image.isTemplate = false
+        image.accessibilityDescription = vendor.displayName
+        return image
+    }
+
+    private func makeVendorInfoCell() -> NSView {
+        let symbol = NSImageView(image: NSImage(
+            systemSymbolName: "checkmark.seal.fill",
+            accessibilityDescription: nil
+        )!)
+        symbol.symbolConfiguration = .init(pointSize: 14, weight: .medium)
+        symbol.contentTintColor = .secondaryLabelColor
+        let label = NSTextField(wrappingLabelWithString: "6 个预设\n开箱即用")
+        label.font = .systemFont(ofSize: 10.5, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        label.maximumNumberOfLines = 2
+        let row = NSStackView(views: [symbol, label, NSView()])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        let cell = padded(row, horizontal: 20, vertical: 12)
+        cell.wantsLayer = true
+        cell.layer?.cornerRadius = 12
+        cell.layer?.borderWidth = 0.7
+        cell.layer?.borderColor = NSColor.separatorColor.cgColor
+        cell.heightAnchor.constraint(equalToConstant: 62).isActive = true
+        return cell
+    }
+
+    private func makeEditorGrid(_ fields: [(String, NSView)]) -> NSGridView {
+        let grid = NSGridView(views: fields.map { [fieldLabel($0.0), $0.1] })
+        grid.rowSpacing = 13
+        grid.columnSpacing = 16
+        grid.column(at: 0).width = 104
+        grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 1).xPlacement = .fill
+        return grid
+    }
+
+    private func sectionHeading(title: String, detail: String) -> NSView {
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = displayFont(size: 13, weight: .semibold)
+        let detailLabel = NSTextField(wrappingLabelWithString: detail)
+        detailLabel.font = .systemFont(ofSize: 11.5)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.maximumNumberOfLines = 2
+        let stack = NSStackView(views: [titleLabel, detailLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        return stack
     }
 
     private func buildAppearancePage() -> NSView {
         let themeRow = settingRow(
-            title: "主题",
-            detail: "选择浅色、深色或跟随系统。",
-            control: themePopup
+            title: "界面主题",
+            detail: "选择跟随系统、浅色或深色，切换后立即生效。",
+            control: themeControl
         )
-        let iconRow = settingRow(
-            title: "状态图标",
-            detail: "选择菜单栏中的图标样式。",
-            control: iconStylePopup
+
+        statusStyleButtons.removeAll(keepingCapacity: true)
+        let buttons = StatusIconStyle.allCases.map(makeStatusStyleButton)
+        var rows: [[NSView]] = []
+        for index in stride(from: 0, to: buttons.count, by: 5) {
+            rows.append((0..<5).map { offset in
+                index + offset < buttons.count ? buttons[index + offset] : NSView()
+            })
+        }
+        let grid = NSGridView(views: rows)
+        grid.rowSpacing = 8
+        grid.columnSpacing = 8
+        for columnIndex in 0..<5 {
+            grid.column(at: columnIndex).xPlacement = .fill
+        }
+        if let first = buttons.first {
+            for button in buttons.dropFirst() {
+                button.widthAnchor.constraint(equalTo: first.widthAnchor).isActive = true
+            }
+        }
+        for rowIndex in rows.indices {
+            grid.row(at: rowIndex).yPlacement = .fill
+        }
+
+        let styleHeading = appearanceSectionHeading(
+            title: "菜单栏状态样式",
+            detail: "预览并选择一种状态图标；黑白高对比边框表示当前样式。"
         )
-        let preview = NSTextField(wrappingLabelWithString: "红：执行中   ·   黄：等待工具   ·   绿：可以输入")
-        preview.textColor = .secondaryLabelColor
-        preview.font = .systemFont(ofSize: 12)
-        preview.alignment = .center
-        preview.isSelectable = true
+        let styleGallery = padded(grid, horizontal: 16, vertical: 14)
+        let legend = NSStackView(views: [
+            signalLegend(color: .systemRed, title: "执行中", detail: "正在请求模型"),
+            verticalSeparator(),
+            signalLegend(color: .systemYellow, title: "等待中", detail: "工具或命令运行"),
+            verticalSeparator(),
+            signalLegend(color: .systemGreen, title: "已就绪", detail: "可以继续输入")
+        ])
+        legend.orientation = .horizontal
+        legend.alignment = .centerY
+        legend.distribution = .fillEqually
+        legend.spacing = 12
+
         return page(
             title: "状态与外观",
-            subtitle: "自定义 Agent Pulse 的显示方式。",
-            cards: [card([themeRow, separator(), iconRow]), card([padded(preview, vertical: 13)])]
+            subtitle: "调整界面主题与菜单栏状态反馈。",
+            cards: [
+                card([themeRow], interactive: true),
+                card([styleHeading, separator(), styleGallery], interactive: true),
+                card([padded(legend, horizontal: 18, vertical: 12)])
+            ]
         )
+    }
+
+    private func makeStatusStyleButton(_ style: StatusIconStyle) -> StatusStyleButton {
+        let button = StatusStyleButton(title: style.displayName, target: self, action: #selector(iconStyleChanged(_:)))
+        button.style = style
+        button.image = StatusIconRenderer.image(style: style, active: .green)
+        button.imagePosition = .imageLeading
+        button.imageHugsTitle = true
+        button.alignment = .center
+        button.isBordered = false
+        button.wantsLayer = true
+        button.font = displayFont(size: 11.5, weight: .semibold)
+        button.toolTip = "切换为\(style.displayName)"
+        button.heightAnchor.constraint(equalToConstant: 58).isActive = true
+        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 104).isActive = true
+        button.setChoiceSelected(style == StatusIconPreference.selected)
+        statusStyleButtons[style] = button
+        return button
+    }
+
+    private func appearanceSectionHeading(title: String, detail: String) -> NSView {
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let detailLabel = NSTextField(wrappingLabelWithString: detail)
+        detailLabel.font = .systemFont(ofSize: 11.5)
+        detailLabel.textColor = .secondaryLabelColor
+        let stack = NSStackView(views: [titleLabel, detailLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        return padded(stack, horizontal: 18, vertical: 14)
+    }
+
+    private func signalLegend(color: NSColor, title: String, detail: String) -> NSView {
+        let dot = NSView()
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 5
+        dot.layer?.backgroundColor = color.cgColor
+        dot.widthAnchor.constraint(equalToConstant: 10).isActive = true
+        dot.heightAnchor.constraint(equalToConstant: 10).isActive = true
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        let detailLabel = NSTextField(labelWithString: detail)
+        detailLabel.font = .systemFont(ofSize: 10.5)
+        detailLabel.textColor = .secondaryLabelColor
+        let text = NSStackView(views: [titleLabel, detailLabel])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 2
+        let row = NSStackView(views: [dot, text])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 9
+        return row
     }
 
     private func buildVersionPage() -> NSView {
@@ -545,14 +1627,14 @@ final class SettingsWindowController: NSWindowController {
         currentVersionLabel.isSelectable = true
         updateStatusLabel.font = .systemFont(ofSize: 12)
         updateStatusLabel.textColor = .secondaryLabelColor
-        updateStatusLabel.maximumNumberOfLines = 2
+        updateStatusLabel.maximumNumberOfLines = 3
         updateStatusLabel.isSelectable = true
         let currentRow = settingRow(
             title: "当前版本",
             detail: "已安装的 Agent Pulse 版本。",
             control: currentVersionLabel
         )
-        let actions = NSStackView(views: [openProjectButton, checkUpdateButton])
+        let actions = NSStackView(views: [openProjectButton, checkUpdateButton, installUpdateButton])
         actions.orientation = .horizontal
         actions.spacing = 8
         let updateRow = settingRow(
@@ -563,54 +1645,101 @@ final class SettingsWindowController: NSWindowController {
         return page(
             title: "版本",
             subtitle: "查看当前版本并检查是否有可用更新。",
-            cards: [card([currentRow, separator(), updateRow]), card([padded(updateStatusLabel, vertical: 13)])]
+            cards: [
+                card([currentRow, separator(), updateRow], interactive: true),
+                card([padded(updateStatusLabel, vertical: 13)])
+            ]
         )
     }
 
-    private func page(title: String, subtitle: String, cards: [NSView]) -> NSView {
+    private func page(
+        title: String,
+        subtitle: String,
+        headerAccessory: NSView? = nil,
+        cards: [NSView]
+    ) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 25, weight: .semibold)
+        titleLabel.font = displayFont(size: 30, weight: .bold)
         titleLabel.isSelectable = true
         let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
-        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.font = .systemFont(ofSize: 13.5)
         subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.maximumNumberOfLines = 2
         subtitleLabel.isSelectable = true
         let header = NSStackView(views: [titleLabel, subtitleLabel])
         header.orientation = .vertical
         header.alignment = .leading
-        header.spacing = 5
+        header.spacing = 7
+        let headerRow = NSStackView(views: [header, NSView()] + (headerAccessory.map { [$0] } ?? []))
+        headerRow.orientation = .horizontal
+        headerRow.alignment = .centerY
+        headerRow.spacing = 14
 
-        let stack = NSStackView(views: [header] + cards + [NSView()])
+        let stack = NSStackView(views: [headerRow] + cards + [NSView()])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 16
+        stack.distribution = .fill
+        stack.spacing = 18
         stack.translatesAutoresizingMaskIntoConstraints = false
         let view = NSView()
         view.addSubview(stack)
-        ([header] + cards).forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        ([headerRow] + cards).forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 34),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -34),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 55),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 38),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -38),
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 48),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20)
         ])
         return view
     }
 
-    private func card(_ rows: [NSView]) -> NSView {
-        let box = NSBox()
+    private func card(_ rows: [NSView], interactive: Bool = false) -> NSView {
+        let box = TasteCardView()
         box.boxType = .custom
+        box.respondsToHover = interactive
+        box.wantsLayer = true
         box.borderColor = NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor.white.withAlphaComponent(0.10)
-                : NSColor.black.withAlphaComponent(0.09)
+                ? NSColor.white.withAlphaComponent(0.12)
+                : NSColor.black.withAlphaComponent(0.10)
         }
-        box.borderWidth = 0.6
-        box.cornerRadius = 11
+        box.borderWidth = 0.7
+        box.cornerRadius = 15
         box.fillColor = NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor(calibratedWhite: 0.13, alpha: 1)
+                ? NSColor(calibratedWhite: 0.145, alpha: 1)
                 : .white
+        }
+        box.layer?.shadowColor = NSColor.black.cgColor
+        box.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        box.layer?.shadowRadius = 10
+        box.layer?.shadowOpacity = 0.04
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        box.contentView?.addSubview(stack)
+        rows.forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: box.contentView!.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: box.contentView!.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: box.contentView!.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: box.contentView!.bottomAnchor)
+        ])
+        return box
+    }
+
+    private func featureCard(_ rows: [NSView]) -> NSView {
+        let box = TasteCardView()
+        box.boxType = .custom
+        box.wantsLayer = true
+        box.cornerRadius = 17
+        box.borderWidth = 0
+        box.fillColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.94, alpha: 1)
+                : NSColor(calibratedWhite: 0.055, alpha: 1)
         }
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical
@@ -645,7 +1774,7 @@ final class SettingsWindowController: NSWindowController {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 16
-        return padded(row, horizontal: 18, vertical: 14)
+        return padded(row, horizontal: 22, vertical: 16)
     }
 
     private func padded(_ child: NSView, horizontal: CGFloat = 18, vertical: CGFloat = 10) -> NSView {
@@ -667,6 +1796,47 @@ final class SettingsWindowController: NSWindowController {
         return box
     }
 
+    private func verticalSeparator() -> NSView {
+        let box = NSBox()
+        box.boxType = .separator
+        box.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        box.heightAnchor.constraint(equalToConstant: 72).isActive = true
+        return box
+    }
+
+    private func displayFont(size: CGFloat, weight: NSFont.Weight) -> NSFont {
+        NSFont(name: "Cabinet Grotesk", size: size) ?? .systemFont(ofSize: size, weight: weight)
+    }
+
+    private func featurePrimaryColor() -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .black : .white
+        }
+    }
+
+    private func featureSecondaryColor() -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.black.withAlphaComponent(0.58)
+                : NSColor.white.withAlphaComponent(0.62)
+        }
+    }
+
+    private func stylePrimaryButton() {
+        confirmButton.role = .primary
+        confirmButton.needsDisplay = true
+    }
+
+    private func styleSegmentedControls() {
+        let selectedColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white : .black
+        }
+        [agentControl, routeControl, themeControl].forEach { control in
+            control.segmentStyle = .rounded
+            control.selectedSegmentBezelColor = selectedColor
+        }
+    }
+
     private func fieldLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: 12, weight: .medium)
@@ -684,8 +1854,8 @@ final class SettingsWindowController: NSWindowController {
         button.isBordered = false
         button.font = .systemFont(ofSize: 13, weight: .medium)
         button.wantsLayer = true
-        button.layer?.cornerRadius = 7
-        button.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        button.layer?.cornerRadius = 9
+        button.heightAnchor.constraint(equalToConstant: 38).isActive = true
         return button
     }
 
@@ -697,6 +1867,8 @@ final class SettingsWindowController: NSWindowController {
     private func selectSection(_ section: Section) {
         pageHost.subviews.forEach { $0.removeFromSuperview() }
         guard let page = pages[section] else { return }
+        selectedSection = section
+        page.alphaValue = 0
         page.translatesAutoresizingMaskIntoConstraints = false
         pageHost.addSubview(page)
         NSLayoutConstraint.activate([
@@ -705,12 +1877,25 @@ final class SettingsWindowController: NSWindowController {
             page.topAnchor.constraint(equalTo: pageHost.topAnchor),
             page.bottomAnchor.constraint(equalTo: pageHost.bottomAnchor)
         ])
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            page.animator().alphaValue = 1
+        }
+        let dark = window?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         for (key, button) in sidebarButtons {
-            let selected = key == section
-            button.layer?.backgroundColor = selected ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.13).cgColor : NSColor.clear.cgColor
-            button.contentTintColor = selected ? .labelColor : .secondaryLabelColor
+            let visibleSection = section == .providerEditor ? Section.route : section
+            let selected = key == visibleSection
+            button.layer?.backgroundColor = selected
+                ? (dark ? NSColor.white : NSColor.black).cgColor
+                : NSColor.clear.cgColor
+            button.contentTintColor = selected
+                ? (dark ? .black : .white)
+                : .secondaryLabelColor
+            button.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .medium)
         }
         if section == .dashboard { refreshDashboard() }
+        if section == .route { reloadModelList() }
     }
 
     func present() {
@@ -719,33 +1904,104 @@ final class SettingsWindowController: NSWindowController {
         agentControl.selectedSegment = AgentKind.allCases.firstIndex(of: selectedAgent) ?? 0
         let route = RouteConfigManager.currentRoute()
         routeControl.selectedSegment = route == .official ? 0 : 1
-        if selectedAgent == .cursor,
-           let cursorProviderID = CursorUsagePreference.providerID,
-           providers.contains(where: { $0.id == cursorProviderID }) {
-            selectedProviderID = cursorProviderID
-        } else if case let .provider(id) = route {
+        cursorOfficialUsageSwitch.state = .on
+        if selectedAgent == .codex,
+                  case let .provider(id) = route,
+                  providers.contains(where: { $0.id == id && $0.supports(.codex) }) {
             selectedProviderID = id
         } else {
-            selectedProviderID = ProviderStore.selectedProviderID() ?? providers.first?.id
+            selectedProviderID = nil
         }
-        cursorOfficialUsageSwitch.state = CursorUsagePreference.officialUsageEnabled ? .on : .off
         reloadProviderPopups()
         loadSelectedProvider()
         statusLabel.stringValue = ""
         confirmButton.isEnabled = true
         updateConfirmButtonTitle()
-        if let index = StatusIconStyle.allCases.firstIndex(of: StatusIconPreference.selected) {
-            iconStylePopup.selectItem(at: index)
-        }
         if let index = AppTheme.allCases.firstIndex(of: AppThemePreference.selected) {
-            themePopup.selectItem(at: index)
+            themeControl.selectedSegment = index
         }
+        updateAppearanceSelectionStates()
         updateRouteFields()
         refreshDashboard()
         selectSection(.dashboard)
         currentVersionLabel.stringValue = AppUpdateChecker.currentVersion
         checkForUpdates()
 
+        NSApp.activate(ignoringOtherApps: true)
+        showWindow(nil)
+        window?.center()
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    func presentProviderPreview() {
+        providers = []
+        selectedProviderID = nil
+        agentControl.selectedSegment = AgentKind.allCases.firstIndex(of: .codex) ?? 0
+        addProvider()
+        editorAgentLabel.stringValue = AgentKind.codex.displayName
+        statusLabel.stringValue = "界面预览模式"
+        selectSection(.providerEditor)
+        NSApp.activate(ignoringOtherApps: true)
+        showWindow(nil)
+        window?.center()
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    func presentAppearancePreview() {
+        statusLabel.stringValue = "界面预览模式"
+        if let index = AppTheme.allCases.firstIndex(of: AppThemePreference.selected) {
+            themeControl.selectedSegment = index
+        }
+        updateAppearanceSelectionStates()
+        selectSection(.appearance)
+        NSApp.activate(ignoringOtherApps: true)
+        showWindow(nil)
+        window?.center()
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    func presentRoutePreview() {
+        providers = [
+            ProviderProfile(
+                id: "preview-deepseek",
+                name: "DeepSeek",
+                baseURL: "https://api.deepseek.com",
+                model: "deepseek-v4-flash",
+                apiFormat: .responses,
+                agents: [.codex],
+                vendor: .deepSeek
+            ),
+            ProviderProfile(
+                id: "preview-custom",
+                name: "研发代理",
+                baseURL: "https://api.example.com/v1",
+                model: "company-code-model",
+                apiFormat: .responses,
+                agents: [.codex],
+                vendor: .custom
+            )
+        ]
+        selectedProviderID = "preview-deepseek"
+        agentControl.selectedSegment = AgentKind.allCases.firstIndex(of: .codex) ?? 0
+        routeControl.selectedSegment = 1
+        reloadModelList()
+        statusLabel.stringValue = "界面预览模式"
+        selectSection(.route)
+        NSApp.activate(ignoringOtherApps: true)
+        showWindow(nil)
+        window?.center()
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    func presentVersionUpdatePreview() {
+        let status = AppUpdateStatus(currentVersion: "2.9.0", latestVersion: "2.10.0")
+        availableUpdate = status
+        installUpdateButton.title = "更新到 \(status.latestVersion)"
+        installUpdateButton.isHidden = false
+        updateStatusLabel.textColor = .systemOrange
+        updateStatusLabel.stringValue = "发现新版本 \(status.latestVersion)。点击立即更新后，Agent Pulse 将退出、完成替换并自动重新打开。"
+        statusLabel.stringValue = "界面预览模式"
+        selectSection(.version)
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.center()
@@ -794,12 +2050,22 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func agentChanged() {
         statusLabel.stringValue = ""
-        if selectedAgent() == .cursor,
-           let id = CursorUsagePreference.providerID,
-           providers.contains(where: { $0.id == id }) {
-            selectedProviderID = id
-            selectProvider(id, in: cursorBalanceProviderPopup)
+        let agent = selectedAgent()
+        if agent == .codex {
+            let route = RouteConfigManager.currentRoute()
+            routeControl.selectedSegment = route == .official ? 0 : 1
+            if case let .provider(id) = route,
+               providers.contains(where: { $0.id == id && $0.supports(.codex) }) {
+                selectedProviderID = id
+            } else {
+                selectedProviderID = nil
+            }
+        } else {
+            cursorOfficialUsageSwitch.state = .on
+            selectedProviderID = nil
         }
+        reloadProviderPopups()
+        reloadModelList()
         updateRouteFields()
         updateConfirmButtonTitle()
     }
@@ -827,22 +2093,34 @@ final class SettingsWindowController: NSWindowController {
             : ""
     }
 
-    @objc private func iconStyleChanged() {
-        let index = iconStylePopup.indexOfSelectedItem
-        guard StatusIconStyle.allCases.indices.contains(index) else { return }
-        let style = StatusIconStyle.allCases[index]
+    @objc private func iconStyleChanged(_ sender: StatusStyleButton) {
+        let style = sender.style
         StatusIconPreference.selected = style
         appDelegate?.statusIconStyleDidChange(to: style)
+        updateAppearanceSelectionStates()
         showSuccess("已切换为\(style.displayName)。")
     }
 
     @objc private func themeChanged() {
-        let index = themePopup.indexOfSelectedItem
+        let index = themeControl.selectedSegment
         guard AppTheme.allCases.indices.contains(index) else { return }
         let theme = AppTheme.allCases[index]
         AppThemePreference.selected = theme
         AppThemePreference.apply(theme)
+        stylePrimaryButton()
+        styleSegmentedControls()
+        updateAppearanceSelectionStates()
+        selectSection(selectedSection)
         showSuccess("已切换为\(theme.displayName)主题。")
+    }
+
+    private func updateAppearanceSelectionStates() {
+        for (style, button) in statusStyleButtons {
+            button.setChoiceSelected(style == StatusIconPreference.selected)
+        }
+        if let index = AppTheme.allCases.firstIndex(of: AppThemePreference.selected) {
+            themeControl.selectedSegment = index
+        }
     }
 
     @objc private func openProjectPage() {
@@ -851,6 +2129,8 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func checkForUpdates() {
         guard checkUpdateButton.isEnabled else { return }
+        availableUpdate = nil
+        installUpdateButton.isHidden = true
         checkUpdateButton.isEnabled = false
         checkUpdateButton.title = "正在检查…"
         updateStatusLabel.textColor = .secondaryLabelColor
@@ -864,37 +2144,57 @@ final class SettingsWindowController: NSWindowController {
                 let status = try await AppUpdateChecker.check()
                 if status.updateAvailable {
                     updateStatusLabel.textColor = .systemOrange
-                    updateStatusLabel.stringValue = "发现新版本 \(status.latestVersion)，当前版本为 \(status.currentVersion)。"
+                    updateStatusLabel.stringValue = "发现新版本 \(status.latestVersion)。点击立即更新后，Agent Pulse 将退出、完成替换并自动重新打开。"
+                    availableUpdate = status
+                    installUpdateButton.title = "更新到 \(status.latestVersion)"
+                    installUpdateButton.isHidden = false
                 } else {
                     updateStatusLabel.textColor = .systemGreen
                     updateStatusLabel.stringValue = "当前已是最新版本 \(status.currentVersion)。"
+                    installUpdateButton.isHidden = true
                 }
             } catch {
                 updateStatusLabel.textColor = .systemRed
                 updateStatusLabel.stringValue = "检查失败：\(error.localizedDescription)"
+                installUpdateButton.isHidden = true
+            }
+        }
+    }
+
+    @objc private func installAvailableUpdate() {
+        guard let status = availableUpdate, status.updateAvailable else { return }
+        let alert = NSAlert()
+        alert.messageText = "更新到 Agent Pulse \(status.latestVersion)？"
+        alert.informativeText = "更新包校验完成后，应用会自动退出、替换当前版本并重新打开。旧版会移到废纸篓。"
+        alert.addButton(withTitle: "下载并更新")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        installUpdateButton.isEnabled = false
+        checkUpdateButton.isEnabled = false
+        installUpdateButton.title = "正在下载…"
+        updateStatusLabel.textColor = .secondaryLabelColor
+        updateStatusLabel.stringValue = "正在下载并校验 Agent Pulse \(status.latestVersion)，完成后将自动重新启动…"
+        Task {
+            do {
+                let prepared = try await AppUpdateInstaller.prepare(status)
+                installUpdateButton.title = "正在重启…"
+                updateStatusLabel.stringValue = "更新包已通过校验，正在退出并安装。"
+                try prepared.launch()
+                NSApp.terminate(nil)
+            } catch {
+                installUpdateButton.isEnabled = true
+                checkUpdateButton.isEnabled = true
+                installUpdateButton.title = "重新更新"
+                updateStatusLabel.textColor = .systemRed
+                updateStatusLabel.stringValue = "更新失败：\(error.localizedDescription)"
             }
         }
     }
 
     private func updateRouteFields() {
-        let selectedAgent = selectedAgent()
-        let isCodex = selectedAgent == .codex
-        let isCursor = selectedAgent == .cursor
-        let custom = routeControl.selectedSegment == 1
-        codexRouteCard?.isHidden = !isCodex
-        cursorRouteCard?.isHidden = !isCursor
-        routeControl.isEnabled = isCodex
-        routeProviderPopup.isEnabled = isCodex && custom && !providers.isEmpty
-        cursorModelsButton.isEnabled = isCursor
-        cursorBalanceProviderPopup.isEnabled = isCursor && !providers.isEmpty
-        cursorOfficialUsageSwitch.isEnabled = isCursor
-        if isCodex {
-            routeDescription.stringValue = custom
-                ? "第三方路由使用当前选中的提供商。应用后 Codex 会重新启动，但本地会话不会删除。"
-                : "官方路由使用 Codex 当前的 ChatGPT 登录状态；无需重复配置 API Key。"
-        } else {
-            routeDescription.stringValue = "Cursor 的模型与 BYOK Key 由 Cursor 官方设置管理；Agent Pulse 负责启动和状态同步。"
-        }
+        editorAgentLabel.stringValue = selectedAgent().displayName
+        updateConfirmButtonTitle()
     }
 
     private func selectedAgent() -> AgentKind {
@@ -910,21 +2210,17 @@ final class SettingsWindowController: NSWindowController {
         providerPopup.removeAllItems()
         routeProviderPopup.removeAllItems()
         cursorBalanceProviderPopup.removeAllItems()
-        let titles = ProviderStore.popupTitles(for: providers)
-        for (provider, title) in zip(providers, titles) {
+        let visibleProviders = providers.filter { $0.supports(selectedAgent()) }
+        let titles = ProviderStore.popupTitles(for: visibleProviders)
+        for (provider, title) in zip(visibleProviders, titles) {
             addProviderItem(title: title, providerID: provider.id, to: providerPopup)
             addProviderItem(title: title, providerID: provider.id, to: routeProviderPopup)
             addProviderItem(title: title, providerID: provider.id, to: cursorBalanceProviderPopup)
         }
-        if let id = selectedProviderID, providers.contains(where: { $0.id == id }) {
+        if let id = selectedProviderID, visibleProviders.contains(where: { $0.id == id }) {
             selectProvider(id, in: providerPopup)
             selectProvider(id, in: routeProviderPopup)
             selectProvider(id, in: cursorBalanceProviderPopup)
-        } else if !providers.isEmpty {
-            selectedProviderID = providers[0].id
-            selectProvider(providers[0].id, in: providerPopup)
-            selectProvider(providers[0].id, in: routeProviderPopup)
-            selectProvider(providers[0].id, in: cursorBalanceProviderPopup)
         }
         updateRouteFields()
     }
@@ -952,14 +2248,65 @@ final class SettingsWindowController: NSWindowController {
             modelField.stringValue = ""
             keyField.stringValue = ""
             protocolPopup.selectItem(at: 0)
+            selectedVendor = .deepSeek
+            updateVendorEditor(animated: false)
             return
         }
         nameField.stringValue = provider.name
         baseURLField.stringValue = provider.baseURL
         modelField.stringValue = provider.model
         keyField.stringValue = CredentialStore.load(providerID: id) ?? ""
-        let selectedFormat = provider.apiFormat ?? .automatic
-        protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: selectedFormat) ?? 0)
+        protocolPopup.selectItem(at: 0)
+        selectedVendor = provider.effectiveVendor == .xAI ? .custom : provider.effectiveVendor
+        updateVendorEditor(animated: false)
+    }
+
+    @objc private func vendorChoiceChanged(_ sender: VendorChoiceButton) {
+        let previous = selectedVendor
+        let existing = selectedProviderID.flatMap { id in providers.first(where: { $0.id == id }) }
+        selectedVendor = sender.vendor
+        if let baseURL = selectedVendor.defaultBaseURL,
+           let model = selectedVendor.defaultModel {
+            baseURLField.stringValue = baseURL
+            modelField.stringValue = model
+            protocolPopup.selectItem(at: 0)
+        } else if existing == nil {
+            baseURLField.stringValue = ""
+            modelField.stringValue = ""
+            protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: .automatic) ?? 0)
+        }
+        if existing == nil || nameField.stringValue == "新提供商" || nameField.stringValue == previous.displayName {
+            nameField.stringValue = selectedVendor.displayName
+        }
+        updateVendorEditor(animated: true)
+        window?.makeFirstResponder(nameField)
+    }
+
+    private func updateVendorEditor(animated: Bool) {
+        vendorButtons.forEach { vendor, button in
+            button.setChoiceSelected(vendor == selectedVendor)
+        }
+        let applyState = {
+            self.customProviderFields.isHidden = self.selectedVendor != .custom
+            self.providerPresetSummary.isHidden = self.selectedVendor == .custom
+            if let baseURL = self.selectedVendor.defaultBaseURL,
+               let format = self.selectedVendor.defaultAPIFormat {
+                self.providerPresetSummary.stringValue = "已内置  \(baseURL)   ·   \(format.displayName)"
+            } else {
+                self.providerPresetSummary.stringValue = ""
+            }
+            self.balanceCapabilityLabel.stringValue = self.selectedVendor.balanceDescription
+            self.window?.contentView?.layoutSubtreeIfNeeded()
+        }
+        guard animated else {
+            applyState()
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            applyState()
+        }
     }
 
     @objc private func providerChanged() {
@@ -972,12 +2319,17 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func addProvider() {
         selectedProviderID = ProviderStore.makeProviderID(existing: providers)
-        nameField.stringValue = "新提供商"
-        baseURLField.stringValue = ""
-        modelField.stringValue = ""
+        reloadProviderPopups()
+        providerPopup.insertItem(withTitle: "新提供商", at: 0)
+        providerPopup.item(at: 0)?.representedObject = selectedProviderID
+        providerPopup.selectItem(at: 0)
+        selectedVendor = .deepSeek
+        nameField.stringValue = selectedVendor.displayName
+        baseURLField.stringValue = selectedVendor.defaultBaseURL ?? ""
+        modelField.stringValue = selectedVendor.defaultModel ?? ""
         keyField.stringValue = ""
         protocolPopup.selectItem(at: 0)
-        routeControl.selectedSegment = 1
+        updateVendorEditor(animated: false)
         updateRouteFields()
         window?.makeFirstResponder(nameField)
     }
@@ -1002,15 +2354,19 @@ final class SettingsWindowController: NSWindowController {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             try CredentialStore.delete(providerID: id)
+            try CredentialStore.delete(
+                providerID: ProviderBalanceClient.managementCredentialID(for: id)
+            )
             providers.remove(at: index)
-            selectedProviderID = providers.indices.contains(index) ? providers[index].id : providers.last?.id
+            selectedProviderID = nil
             if CursorUsagePreference.providerID == id {
-                CursorUsagePreference.providerID = selectedProviderID
+                CursorUsagePreference.providerID = nil
             }
             try ProviderStore.saveProviders(providers, selectedProviderID: selectedProviderID)
             reloadProviderPopups()
-            loadSelectedProvider()
+            reloadModelList()
             showSuccess("已删除提供商。")
+            selectSection(.route)
         } catch {
             showError(error.localizedDescription)
         }
@@ -1019,8 +2375,10 @@ final class SettingsWindowController: NSWindowController {
     @objc private func saveProvider() {
         do {
             let profile = try persistCurrentProvider()
-            appDelegate?.ensureChatCompletionsBridge()
+            providerBalances.removeValue(forKey: profile.id)
+            reloadModelList()
             showSuccess("已保存 \(profile.name)。")
+            selectSection(.route)
         } catch {
             showError(error.localizedDescription)
         }
@@ -1047,7 +2405,19 @@ final class SettingsWindowController: NSWindowController {
             }
             do {
                 let result = try await ProviderConnectionTester.test(profile: draft.profile, key: draft.key)
-                showSuccess(result)
+                if draft.profile.effectiveVendor.supportsBalanceLookup || draft.profile.isCodeAPI {
+                    do {
+                        let balance = try await ProviderBalanceClient.fetch(
+                            profile: draft.profile,
+                            apiKey: draft.key
+                        )
+                        showSuccess("\(result) · \(balance.displayText)")
+                    } catch {
+                        showSuccess("\(result) · 余额查询不可用")
+                    }
+                } else {
+                    showSuccess(result)
+                }
             } catch {
                 showError(error.localizedDescription)
             }
@@ -1067,6 +2437,8 @@ final class SettingsWindowController: NSWindowController {
         selectedProviderID = id
         try ProviderStore.saveProviders(providers, selectedProviderID: id)
         try CredentialStore.save(key, providerID: id)
+        let managementCredentialID = ProviderBalanceClient.managementCredentialID(for: id)
+        try CredentialStore.delete(providerID: managementCredentialID)
         reloadProviderPopups()
         return profile
     }
@@ -1074,25 +2446,38 @@ final class SettingsWindowController: NSWindowController {
     private func currentProviderDraft() throws -> (profile: ProviderProfile, key: String) {
         guard let id = selectedProviderID else { throw SettingsError.noProvider }
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = baseURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let baseURL = (selectedVendor.defaultBaseURL ?? baseURLField.stringValue)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let model = modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !model.isEmpty, !key.isEmpty else { throw SettingsError.incomplete }
-        if ProviderStore.hasNameCollision(name, excluding: id, in: providers) {
+        if ProviderStore.hasNameCollision(
+            name,
+            excluding: id,
+            in: providers,
+            agent: selectedAgent()
+        ) {
             throw SettingsError.duplicateName(name)
         }
         guard let url = URL(string: baseURL), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
             throw SettingsError.invalidURL
         }
-        let formatIndex = protocolPopup.indexOfSelectedItem
-        let format = ProviderAPIFormat.allCases.indices.contains(formatIndex)
-            ? ProviderAPIFormat.allCases[formatIndex] : .automatic
+        let boundAgents: [AgentKind]?
+        if let existing = providers.first(where: { $0.id == id }) {
+            boundAgents = existing.agents
+        } else {
+            boundAgents = [selectedAgent()]
+        }
         let profile = ProviderProfile(
             id: id,
             name: name,
             baseURL: baseURL,
             model: model,
-            apiFormat: format == .automatic ? nil : format
+            apiFormat: .responses,
+            agents: boundAgents,
+            vendor: selectedVendor,
+            balanceTeamID: nil
         )
         return (profile, key)
     }
@@ -1125,8 +2510,10 @@ final class SettingsWindowController: NSWindowController {
             var usage: UsageResponse?
             do {
                 if routeControl.selectedSegment == 1 {
-                    let profile = try persistCurrentProvider()
-                    appDelegate?.ensureChatCompletionsBridge()
+                    guard let id = selectedProviderID,
+                          let profile = providers.first(where: {
+                              $0.id == id && $0.supports(.codex)
+                          }) else { throw SettingsError.noProvider }
                     route = .provider(profile.id)
                     if profile.isCodeAPI, let key = CredentialStore.load(providerID: profile.id) {
                         statusLabel.stringValue = "正在验证 CodeAPI Key…"
@@ -1205,10 +2592,8 @@ final class SettingsWindowController: NSWindowController {
             do {
                 let cursorWasRunning = CursorLauncher.isRunning
                 let hooksChanged = try CursorIntegration.installHooks()
-                CursorUsagePreference.officialUsageEnabled = cursorOfficialUsageSwitch.state == .on
-                CursorUsagePreference.providerID = selectedProviderID(
-                    from: cursorBalanceProviderPopup
-                )
+                CursorUsagePreference.officialUsageEnabled = true
+                CursorUsagePreference.providerID = nil
                 AgentPreference.selected = .cursor
                 appDelegate?.agentDidChange(to: .cursor)
                 statusLabel.stringValue = "正在打开 Cursor…"
@@ -1244,6 +2629,8 @@ private enum SettingsError: LocalizedError {
     case incomplete
     case invalidURL
     case duplicateName(String)
+    case missingCredential
+    case officialNotLoggedIn
 
     var errorDescription: String? {
         switch self {
@@ -1251,6 +2638,8 @@ private enum SettingsError: LocalizedError {
         case .incomplete: return "请完整填写名称、Base URL、模型 ID 和 API Key。"
         case .invalidURL: return "Base URL 必须是有效的 http 或 https 地址。"
         case let .duplicateName(name): return "路由名称“\(name)”已存在，请换一个名称。"
+        case .missingCredential: return "该提供商尚未保存 API Key。"
+        case .officialNotLoggedIn: return "官方账号尚未登录。"
         }
     }
 }

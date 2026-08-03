@@ -9,7 +9,148 @@ enum ProviderAPIFormat: String, Codable, CaseIterable, Sendable {
         switch self {
         case .automatic: return "自动识别"
         case .responses: return "Responses API"
-        case .chatCompletions: return "Chat Completions（本地桥接）"
+        case .chatCompletions: return "Chat Completions（旧配置）"
+        }
+    }
+}
+
+enum ProviderVendor: String, Codable, CaseIterable, Sendable {
+    case deepSeek
+    case zhipuAI
+    case moonshot
+    case miniMax
+    case stepFun
+    case miMo
+    case bailian
+    case xAI
+    case custom
+
+    static let presetChoices: [ProviderVendor] = [
+        .deepSeek, .zhipuAI, .moonshot, .miniMax, .stepFun, .miMo, .bailian, .custom
+    ]
+
+    var displayName: String {
+        switch self {
+        case .deepSeek: return "DeepSeek"
+        case .zhipuAI: return "智谱 AI"
+        case .moonshot: return "月之暗面"
+        case .miniMax: return "MiniMax"
+        case .stepFun: return "阶跃星辰"
+        case .miMo: return "MiMo"
+        case .bailian: return "阿里百炼云"
+        case .xAI: return "xAI"
+        case .custom: return "自定义"
+        }
+    }
+
+    var shortName: String {
+        switch self {
+        case .deepSeek: return "DS"
+        case .zhipuAI: return "GLM"
+        case .moonshot: return "K"
+        case .miniMax: return "M"
+        case .stepFun: return "STEP"
+        case .miMo: return "MiMo"
+        case .bailian: return "QWEN"
+        case .xAI: return "xAI"
+        case .custom: return "+"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .deepSeek: return "wave.3.right.circle.fill"
+        case .zhipuAI: return "sparkles.rectangle.stack.fill"
+        case .moonshot: return "moon.stars.fill"
+        case .miniMax: return "arrow.up.left.and.arrow.down.right.circle.fill"
+        case .stepFun: return "square.3.layers.3d.top.filled"
+        case .miMo: return "circle.grid.cross.fill"
+        case .bailian: return "hexagon.fill"
+        case .xAI: return "xmark.circle.fill"
+        case .custom: return "slider.horizontal.3"
+        }
+    }
+
+    var defaultBaseURL: String? {
+        switch self {
+        case .deepSeek: return "https://api.deepseek.com"
+        case .zhipuAI: return "https://open.bigmodel.cn/api/coding/paas/v4"
+        case .moonshot: return "https://api.moonshot.cn/v1"
+        case .miniMax: return "https://api.minimaxi.com/v1"
+        case .stepFun: return "https://api.stepfun.ai/v1"
+        case .miMo: return "https://api.xiaomimimo.com/v1"
+        case .bailian: return "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        case .xAI: return "https://api.x.ai/v1"
+        case .custom: return nil
+        }
+    }
+
+    var defaultModel: String? {
+        switch self {
+        case .deepSeek: return "deepseek-v4-flash"
+        case .zhipuAI: return "glm-5.2"
+        case .moonshot: return "kimi-k2.7-code"
+        case .miniMax: return "MiniMax-M2.7"
+        case .stepFun: return "step-3.5-flash"
+        case .miMo: return "mimo-v2.5-pro"
+        case .bailian: return "qwen3-coder-plus"
+        case .xAI: return "grok-4.5"
+        case .custom: return nil
+        }
+    }
+
+    var balanceDescription: String {
+        switch self {
+        case .deepSeek: return "查询充值余额，不计赠送余额。"
+        case .zhipuAI: return "查询 Coding Plan 的 5 小时与周配额。"
+        case .moonshot: return "查询现金余额，不计代金券。"
+        case .miniMax: return "查询 Coding Plan 的 5 小时与周配额。"
+        case .stepFun: return "查询账户当前可用余额。"
+        case .miMo: return "MiMo 暂未公开余额查询 API，可前往控制台查看。"
+        case .bailian: return "余额请前往阿里百炼云控制台查看。"
+        case .xAI: return "余额查询需要独立的 Management Key 与 Team ID。"
+        case .custom: return "自定义提供商暂不自动查询余额。"
+        }
+    }
+
+    static func infer(from baseURL: String) -> ProviderVendor {
+        guard let host = URL(string: baseURL)?.host?.lowercased() else { return .custom }
+        if host.contains("deepseek.com") { return .deepSeek }
+        if host.contains("bigmodel.cn") || host == "api.z.ai" { return .zhipuAI }
+        if host.contains("moonshot.cn") || host == "api.moonshot.ai" || host == "api.kimi.com" { return .moonshot }
+        if host.contains("minimaxi.com") || host.contains("minimax.io") { return .miniMax }
+        if host.contains("stepfun.ai") || host.contains("stepfun.com") { return .stepFun }
+        if host.contains("xiaomimimo.com") { return .miMo }
+        if host.contains("dashscope.aliyuncs.com") || host.hasSuffix("maas.aliyuncs.com") { return .bailian }
+        if host == "api.x.ai" { return .xAI }
+        return .custom
+    }
+
+    var logoResourceName: String? {
+        switch self {
+        case .deepSeek: return "deepseek"
+        case .zhipuAI: return "zhipu"
+        case .moonshot: return "kimi"
+        case .miniMax: return "minimax"
+        case .stepFun: return "stepfun"
+        case .miMo: return "xiaomimimo"
+        case .bailian: return "bailian"
+        case .xAI: return nil
+        case .custom: return nil
+        }
+    }
+
+    var defaultAPIFormat: ProviderAPIFormat? {
+        switch self {
+        case .custom: return nil
+        default: return .responses
+        }
+    }
+
+    var supportsBalanceLookup: Bool {
+        switch self {
+        case .deepSeek, .zhipuAI, .moonshot, .miniMax, .stepFun, .xAI: return true
+        case .miMo, .bailian, .custom: return false
         }
     }
 }
@@ -20,19 +161,37 @@ struct ProviderProfile: Codable, Equatable, Identifiable, Sendable {
     var baseURL: String
     var model: String
     var apiFormat: ProviderAPIFormat?
+    var agents: [AgentKind]?
+    var vendor: ProviderVendor?
+    var balanceTeamID: String?
 
     init(
         id: String,
         name: String,
         baseURL: String,
         model: String,
-        apiFormat: ProviderAPIFormat? = nil
+        apiFormat: ProviderAPIFormat? = nil,
+        agents: [AgentKind]? = nil,
+        vendor: ProviderVendor? = nil,
+        balanceTeamID: String? = nil
     ) {
         self.id = id
         self.name = name
         self.baseURL = baseURL
         self.model = model
         self.apiFormat = apiFormat
+        self.agents = agents
+        self.vendor = vendor
+        self.balanceTeamID = balanceTeamID
+    }
+
+    var boundAgents: Set<AgentKind> {
+        let configured = agents ?? AgentKind.allCases
+        return Set(configured.isEmpty ? AgentKind.allCases : configured)
+    }
+
+    func supports(_ agent: AgentKind) -> Bool {
+        boundAgents.contains(agent)
     }
 
     var isCodeAPI: Bool {
@@ -44,10 +203,13 @@ struct ProviderProfile: Codable, Equatable, Identifiable, Sendable {
         return host == "api.deepseek.com" || host.hasSuffix(".deepseek.com")
     }
 
+    var effectiveVendor: ProviderVendor {
+        vendor ?? ProviderVendor.infer(from: baseURL)
+    }
+
     var effectiveAPIFormat: ProviderAPIFormat {
         switch apiFormat ?? .automatic {
-        case .automatic: return isDeepSeek ? .chatCompletions : .responses
-        case let format: return format
+        case .automatic, .chatCompletions, .responses: return .responses
         }
     }
 
@@ -60,7 +222,9 @@ struct ProviderProfile: Codable, Equatable, Identifiable, Sendable {
         name: "CodeAPI",
         baseURL: "https://codeapi.nexita.net",
         model: "gpt-5.6-sol",
-        apiFormat: .responses
+        apiFormat: .responses,
+        agents: nil,
+        vendor: .custom
     )
 }
 
@@ -91,6 +255,10 @@ enum ProviderStore {
     }
 
     static func providers() -> [ProviderProfile] { load().providers }
+
+    static func providers(for agent: AgentKind) -> [ProviderProfile] {
+        load().providers.filter { $0.supports(agent) }
+    }
 
     static func provider(id: String) -> ProviderProfile? {
         load().providers.first { $0.id == id }
@@ -129,11 +297,14 @@ enum ProviderStore {
     static func hasNameCollision(
         _ name: String,
         excluding providerID: String,
-        in providers: [ProviderProfile]
+        in providers: [ProviderProfile],
+        agent: AgentKind? = nil
     ) -> Bool {
         let candidate = normalizedName(name)
-        return providers.contains {
-            $0.id != providerID && normalizedName($0.name) == candidate
+        return providers.contains { provider in
+            provider.id != providerID
+                && normalizedName(provider.name) == candidate
+                && (agent.map { provider.supports($0) } ?? true)
         }
     }
 
@@ -198,10 +369,12 @@ enum ProviderStore {
     }
 
     private static func firstDuplicateName(in providers: [ProviderProfile]) -> String? {
-        var names = Set<String>()
-        for provider in providers {
-            guard names.insert(normalizedName(provider.name)).inserted else {
-                return provider.name
+        for (index, provider) in providers.enumerated() {
+            for other in providers.dropFirst(index + 1) {
+                if normalizedName(provider.name) == normalizedName(other.name),
+                   !provider.boundAgents.isDisjoint(with: other.boundAgents) {
+                    return other.name
+                }
             }
         }
         return nil

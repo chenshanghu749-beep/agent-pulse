@@ -17,7 +17,6 @@ enum TrafficSignal: CaseIterable, Equatable {
 enum StatusIconStyle: String, CaseIterable {
     case trafficLight
     case lightBulb
-    case topHatMascot
     case basketballMascot
     case trumpMascot
     case pinwheel
@@ -27,7 +26,6 @@ enum StatusIconStyle: String, CaseIterable {
         switch self {
         case .trafficLight: return "经典红绿灯"
         case .lightBulb: return "灵感灯泡"
-        case .topHatMascot: return "礼帽伙伴"
         case .basketballMascot: return "篮球伙伴"
         case .trumpMascot: return "特朗普舞者"
         case .pinwheel: return "旋转风车"
@@ -43,7 +41,7 @@ enum StatusIconStyle: String, CaseIterable {
             case .yellow: return 28
             case .green: return 24
             }
-        case .topHatMascot, .basketballMascot, .trumpMascot:
+        case .basketballMascot, .trumpMascot:
             switch signal {
             case .red: return 18
             case .yellow: return 12
@@ -87,7 +85,6 @@ enum StatusIconRenderer {
 
     static func animationPhase(style: StatusIconStyle, active: TrafficSignal, frame: Int) -> Int {
         switch style {
-        case .topHatMascot: return frame % 8
         case .basketballMascot: return frame % 12
         case .trumpMascot: return frame % 24
         case .pinwheel:
@@ -116,7 +113,6 @@ enum StatusIconRenderer {
         switch style {
         case .trafficLight: image = trafficLight(active: active)
         case .lightBulb: image = lightBulb(active: active)
-        case .topHatMascot: image = topHatMascot(active: active, frame: phase)
         case .basketballMascot: image = basketballMascot(active: active, frame: phase)
         case .trumpMascot: image = trumpMascot(active: active, frame: phase)
         case .pinwheel: image = pinwheel(active: active, phase: phase, phaseCount: 72)

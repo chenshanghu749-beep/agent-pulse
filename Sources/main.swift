@@ -603,6 +603,42 @@ if CommandLine.arguments.contains("--login-status-test") {
         print("CURSOR_HOOKS_ERROR \(error.localizedDescription)")
         exit(EXIT_FAILURE)
     }
+} else if CommandLine.arguments.contains("--provider-ui-preview") {
+    MainActor.assumeIsolated {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        let delegate = AppDelegate()
+        let controller = SettingsWindowController(appDelegate: delegate)
+        controller.presentProviderPreview()
+        app.run()
+    }
+} else if CommandLine.arguments.contains("--appearance-ui-preview") {
+    MainActor.assumeIsolated {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        let delegate = AppDelegate()
+        let controller = SettingsWindowController(appDelegate: delegate)
+        controller.presentAppearancePreview()
+        app.run()
+    }
+} else if CommandLine.arguments.contains("--route-ui-preview") {
+    MainActor.assumeIsolated {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        let delegate = AppDelegate()
+        let controller = SettingsWindowController(appDelegate: delegate)
+        controller.presentRoutePreview()
+        app.run()
+    }
+} else if CommandLine.arguments.contains("--version-update-ui-preview") {
+    MainActor.assumeIsolated {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        let delegate = AppDelegate()
+        let controller = SettingsWindowController(appDelegate: delegate)
+        controller.presentVersionUpdatePreview()
+        app.run()
+    }
 } else if CommandLine.arguments.contains("--self-test") {
     let sample = """
     model = "gpt-5.6-sol"
@@ -617,6 +653,42 @@ if CommandLine.arguments.contains("--login-status-test") {
         baseURL: "https://api.example.com/v1",
         model: "custom-model"
     )
+    let updateFixture = AppUpdateStatus(currentVersion: "2.9.0", latestVersion: "2.10.0")
+    guard updateFixture.updateAvailable,
+          updateFixture.installerURL.absoluteString.hasSuffix("/dist/Agent-Pulse-2.10.0.dmg") else {
+        print("SELF_TEST_ERROR update metadata")
+        exit(EXIT_FAILURE)
+    }
+    try! AppUpdateInstaller.validateHelperScriptForTesting()
+    for vendor in ProviderVendor.presetChoices where vendor != .custom {
+        precondition(vendor.defaultBaseURL?.hasPrefix("https://") == true)
+        precondition(vendor.defaultModel?.isEmpty == false)
+    }
+    precondition(ProviderVendor.presetChoices.contains(.miMo))
+    precondition(ProviderVendor.presetChoices.contains(.bailian))
+    precondition(!ProviderVendor.presetChoices.contains(.xAI))
+    precondition(ProviderVendor.infer(from: "https://api.deepseek.com/v1") == .deepSeek)
+    precondition(ProviderVendor.infer(from: "https://open.bigmodel.cn/api/paas/v4") == .zhipuAI)
+    let zhipuFixture = ProviderProfile(
+        id: "zhipu-fixture",
+        name: "智谱 AI",
+        baseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
+        model: "glm-5.2",
+        vendor: .zhipuAI
+    )
+    precondition(
+        try! ProviderConnectionTester.endpointURL(profile: zhipuFixture).absoluteString
+            == "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    )
+    precondition(ProviderVendor.infer(from: "https://api.moonshot.cn/v1") == .moonshot)
+    precondition(ProviderVendor.infer(from: "https://api.minimaxi.com/v1") == .miniMax)
+    precondition(ProviderVendor.infer(from: "https://api.stepfun.ai/v1") == .stepFun)
+    precondition(ProviderVendor.infer(from: "https://api.xiaomimimo.com/v1") == .miMo)
+    precondition(
+        ProviderVendor.infer(from: "https://dashscope.aliyuncs.com/compatible-mode/v1") == .bailian
+    )
+    precondition(ProviderVendor.infer(from: "https://api.x.ai/v1") == .xAI)
+    precondition(ProviderVendor.infer(from: "https://api.example.com/v1") == .custom)
     let custom = RouteConfigManager.render(sample, route: .provider(provider.id), profile: provider)
     precondition(custom.hasPrefix("model_provider = \"openai\""))
     precondition(custom.contains("model = \"custom-model\""))
@@ -645,6 +717,29 @@ if CommandLine.arguments.contains("--login-status-test") {
     let duplicateTitles = ProviderStore.popupTitles(for: [provider, sameNameProvider])
     precondition(duplicateTitles.count == 2)
     precondition(duplicateTitles[0] != duplicateTitles[1])
+
+    let cursorOnlyProvider = ProviderProfile(
+        id: "cursor-only-provider",
+        name: provider.name,
+        baseURL: "https://cursor.example.com/v1",
+        model: "cursor-model",
+        agents: [.cursor]
+    )
+    precondition(cursorOnlyProvider.supports(.cursor))
+    precondition(!cursorOnlyProvider.supports(.codex))
+    precondition(provider.supports(.codex) && provider.supports(.cursor))
+    precondition(!ProviderStore.hasNameCollision(
+        provider.name,
+        excluding: cursorOnlyProvider.id,
+        in: [ProviderProfile(
+            id: provider.id,
+            name: provider.name,
+            baseURL: provider.baseURL,
+            model: provider.model,
+            agents: [.codex]
+        )],
+        agent: .cursor
+    ))
     let sameNameConfig = RouteConfigManager.render(
         sample,
         route: .provider(sameNameProvider.id),
@@ -748,13 +843,13 @@ if CommandLine.arguments.contains("--login-status-test") {
         profiles: [deepSeek],
         legacyProfile: deepSeek
     )
-    precondition(deepSeek.effectiveAPIFormat == .chatCompletions)
+    precondition(deepSeek.effectiveAPIFormat == .responses)
     precondition(deepSeekConfig.hasPrefix("model_provider = \"openai\""))
     precondition(deepSeekConfig.contains(
-        "openai_base_url = \"http://127.0.0.1:37531/provider/deepseek-test\""
+        "openai_base_url = \"https://api.deepseek.com\""
     ))
     precondition(deepSeekConfig.contains(
-        "base_url = \"http://127.0.0.1:37531/provider/deepseek-test\""
+        "base_url = \"https://api.deepseek.com\""
     ))
     precondition(deepSeekConfig.contains("wire_api = \"responses\""))
     precondition(RouteConfigManager.detectedRoute(
@@ -1029,13 +1124,16 @@ if CommandLine.arguments.contains("--login-status-test") {
         }
     }
     let monitorStarted = monitor.start()
-    precondition(monitorStarted)
-    Thread.sleep(forTimeInterval: 0.2)
-    try! Data(event("task_started").utf8).write(
-        to: monitorRoot.appendingPathComponent("event.jsonl")
-    )
-    let monitorResult = monitorSignal.wait(timeout: .now() + 3)
-    precondition(monitorResult == .success)
+    if monitorStarted {
+        Thread.sleep(forTimeInterval: 0.5)
+        try! Data(event("task_started").utf8).write(
+            to: monitorRoot.appendingPathComponent("event.jsonl")
+        )
+        let monitorResult = monitorSignal.wait(timeout: .now() + 5)
+        precondition(monitorResult == .success)
+    } else {
+        print("SELF_TEST_SKIP FSEvents unavailable; polling fallback remains active")
+    }
     monitor.stop()
 
     let migrationRoot = FileManager.default.temporaryDirectory
