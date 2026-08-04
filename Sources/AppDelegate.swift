@@ -14,6 +14,76 @@ struct DashboardSnapshot {
     let message: String?
 }
 
+struct HermesDashboardPresentation: Equatable {
+    let routeName: String
+    let usageLabel: String
+    let usageValue: String
+    let usageDetail: String
+
+    var statusValue: String {
+        guard usageValue != "—" else { return routeName }
+        return usageLabel == "今日 Token" ? "\(usageValue) Token" : usageValue
+    }
+
+    static func make(
+        providerName: String?,
+        config: HermesModelConfig,
+        usage: HermesUsageSnapshot?,
+        codeBalance: Double?,
+        providerBalance: ProviderBalanceSnapshot?
+    ) -> HermesDashboardPresentation {
+        let routeName = providerName ?? config.provider
+        let localUsageDetail: String
+        if let usage {
+            localUsageDetail = "\(formattedNumber(usage.totalTokens)) Token · \(usage.apiCalls) 次请求 · 费用 \(money(usage.displayCostUSD)) · \(config.model)"
+        } else {
+            localUsageDetail = "\(config.provider) · \(config.model)"
+        }
+        if let codeBalance {
+            return HermesDashboardPresentation(
+                routeName: routeName,
+                usageLabel: "提供商余额",
+                usageValue: money(codeBalance),
+                usageDetail: localUsageDetail
+            )
+        }
+        if let providerBalance {
+            let isQuota = providerBalance.displayText.hasPrefix("配额 ")
+            let value = providerBalance.displayText
+                .replacingOccurrences(of: "余额 ", with: "")
+                .replacingOccurrences(of: "配额 ", with: "")
+            return HermesDashboardPresentation(
+                routeName: routeName,
+                usageLabel: isQuota ? "提供商配额" : "提供商余额",
+                usageValue: value,
+                usageDetail: "\(providerBalance.detail) · \(localUsageDetail)"
+            )
+        }
+        if let usage {
+            return HermesDashboardPresentation(
+                routeName: routeName,
+                usageLabel: "今日 Token",
+                usageValue: formattedNumber(usage.totalTokens),
+                usageDetail: "\(usage.apiCalls) 次请求 · 费用 \(money(usage.displayCostUSD)) · \(config.model)"
+            )
+        }
+        return HermesDashboardPresentation(
+            routeName: routeName,
+            usageLabel: "今日 Token",
+            usageValue: "—",
+            usageDetail: "\(config.provider) · \(config.model)"
+        )
+    }
+
+    private static func money(_ value: Double) -> String { String(format: "$%.2f", value) }
+
+    private static func formattedNumber(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
 private final class StatusIconOverlayView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
@@ -50,6 +120,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var latestCursorStatus = CursorStatus.unavailable
     private var latestCursorOfficialUsage: CursorOfficialUsageSnapshot?
     private var latestCursorProviderUsage: UsageResponse?
+    private var latestHermesStatus = HermesStatus.unavailable
+    private var latestHermesUsage: HermesUsageSnapshot?
     private var cursorHooksNeedRestart = false
     private var latestError: String?
     private var lastUpdated: Date?
@@ -270,6 +342,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         latestOfficialUsage = nil
         latestCursorOfficialUsage = nil
         latestCursorProviderUsage = nil
+        latestHermesStatus = .unavailable
+        latestHermesUsage = nil
         taskSnapshot = TaskActivitySnapshot(state: .ready, changedAt: nil)
         startStartupChase()
         updateStatusTitle()
@@ -370,6 +444,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 parts.append(money(usage.balance))
             }
             applyStatusTitle(parts.joined(separator: " · "), toolTip: "Agent Pulse · Cursor", to: button)
+            return
+        }
+        if agent == .hermes {
+            let providerName = HermesPreference.providerID
+                .flatMap { ProviderStore.provider(id: $0)?.name }
+            let presentation = HermesDashboardPresentation.make(
+                providerName: providerName,
+                config: latestHermesStatus.modelConfig,
+                usage: latestHermesUsage,
+                codeBalance: latestCodeUsage?.balance,
+                providerBalance: latestProviderBalance
+            )
+            applyStatusTitle(
+                "Hermes · \(compact(presentation.statusValue))",
+                toolTip: "Agent Pulse · Hermes · \(latestHermesStatus.detail)",
+                to: button
+            )
             return
         }
         let title: String
@@ -623,6 +714,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 usageDetail = "Cursor 官方用量已关闭"
             }
+        } else if agent == .hermes {
+            let config = latestHermesStatus.modelConfig
+            let providerName = HermesPreference.providerID
+                .flatMap { ProviderStore.provider(id: $0)?.name }
+            let presentation = HermesDashboardPresentation.make(
+                providerName: providerName,
+                config: config,
+                usage: latestHermesUsage,
+                codeBalance: latestCodeUsage?.balance,
+                providerBalance: latestProviderBalance
+            )
+            routeName = presentation.routeName
+            usageLabel = presentation.usageLabel
+            usageValue = presentation.usageValue
+            usageDetail = presentation.usageDetail
         } else {
             switch route {
             case .official:
@@ -747,6 +853,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 updateStatusTitle()
                 return
             }
+            if agent == .hermes {
+                let result = await Task.detached(priority: .utility) {
+                    (HermesIntegration.readStatus(), HermesUsageReader.readToday())
+                }.value
+                latestHermesStatus = result.0
+                latestHermesUsage = result.1
+                latestCodeUsage = nil
+                latestProviderBalance = nil
+                var errors: [String] = []
+                if !latestHermesStatus.isInstalled || !latestHermesStatus.cliAvailable {
+                    errors.append(latestHermesStatus.detail)
+                }
+                if let id = HermesPreference.providerID,
+                   let provider = ProviderStore.provider(id: id),
+                   let key = CredentialStore.load(providerID: id), !key.isEmpty {
+                    if provider.isCodeAPI {
+                        do {
+                            latestCodeUsage = try await CodeAPIClient.fetch(key: key)
+                        } catch {
+                            errors.append("\(provider.name)：\(error.localizedDescription)")
+                        }
+                    } else if provider.effectiveVendor.supportsBalanceLookup {
+                        let managementKey = CredentialStore.load(
+                            providerID: ProviderBalanceClient.managementCredentialID(for: provider.id)
+                        )
+                        do {
+                            latestProviderBalance = try await ProviderBalanceClient.fetch(
+                                profile: provider,
+                                apiKey: key,
+                                managementKey: managementKey
+                            )
+                        } catch {
+                            errors.append("\(provider.name)余额：\(error.localizedDescription)")
+                        }
+                    }
+                }
+                latestError = errors.isEmpty ? nil : errors.joined(separator: "；")
+                lastUpdated = Date()
+                updateStatusTitle()
+                return
+            }
             switch route {
             case let .provider(id):
                 guard let provider = ProviderStore.provider(id: id) else {
@@ -791,12 +938,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func rebuildMainMenu() {
         mainMenu.removeAllItems()
         mainMenu.addItem(info("Agent Pulse", emphasis: true))
-        let routeText = agent == .codex ? "  ·  \(route.displayName)" : ""
+        let routeText: String
+        if agent == .codex {
+            routeText = "  ·  \(route.displayName)"
+        } else if agent == .hermes {
+            routeText = "  ·  \(latestHermesStatus.modelConfig.model)"
+        } else {
+            routeText = ""
+        }
         mainMenu.addItem(info("\(agent.displayName)  ·  \(taskStatusText())\(routeText)"))
         mainMenu.addItem(.separator())
 
         if agent == .cursor {
             addCursorMenu(to: mainMenu)
+        } else if agent == .hermes {
+            addHermesMenu(to: mainMenu)
         } else {
             switch route {
             case let .provider(id):
@@ -831,6 +987,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let dashboardTitle: String
         if agent == .cursor {
             dashboardTitle = "打开 Cursor 用量页面"
+        } else if agent == .hermes {
+            dashboardTitle = HermesPreference.providerID == nil ? "打开 Hermes" : "打开提供商地址"
         } else {
             switch route {
             case .official: dashboardTitle = "打开官方用量页面"
@@ -1015,17 +1173,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func addHermesMenu(to menu: NSMenu) {
+        menu.addItem(info("Hermes", emphasis: true))
+        guard latestHermesStatus.isInstalled else {
+            menu.addItem(info("未找到 Hermes.app"))
+            return
+        }
+        menu.addItem(info("CLI  \(latestHermesStatus.cliAvailable ? "已连接" : "未找到")"))
+        if let id = HermesPreference.providerID,
+           let provider = ProviderStore.provider(id: id) {
+            menu.addItem(info("提供商  \(provider.name)", emphasis: true))
+            menu.addItem(info("模型  \(provider.model)"))
+            if provider.isCodeAPI, let usage = latestCodeUsage {
+                menu.addItem(info("提供商余额  \(money(usage.balance))"))
+            } else if let balance = latestProviderBalance {
+                menu.addItem(info(balance.displayText))
+            }
+        } else {
+            menu.addItem(info("配置  \(latestHermesStatus.modelConfig.provider)", emphasis: true))
+            menu.addItem(info("模型  \(latestHermesStatus.modelConfig.model)"))
+        }
+        menu.addItem(.separator())
+        if let usage = latestHermesUsage {
+            menu.addItem(info("今日 Token  \(number(usage.totalTokens))", emphasis: true))
+            menu.addItem(info("输入  \(number(usage.inputTokens)) · 输出  \(number(usage.outputTokens))"))
+            menu.addItem(info("缓存读取  \(number(usage.cacheReadTokens)) · 推理  \(number(usage.reasoningTokens))"))
+            menu.addItem(info("API 请求  \(number(usage.apiCalls)) 次"))
+            menu.addItem(info("今日费用  \(money(usage.displayCostUSD))"))
+        } else {
+            menu.addItem(info("暂无今日 Token / 费用记录"))
+        }
+    }
+
     private func startTaskActivityMonitor() {
         taskActivityMonitor?.stop()
         let monitor = TaskActivityMonitor(paths: [
             TaskActivityReader.defaultRootURL,
-            CursorIntegration.supportDirectoryURL
+            CursorIntegration.supportDirectoryURL,
+            HermesIntegration.homeURL
         ]) { [weak self] events in
             Task { @MainActor in
                 guard let self else { return }
-                let root = self.agent == .codex
-                    ? TaskActivityReader.defaultRootURL
-                    : CursorIntegration.supportDirectoryURL
+                let root: URL
+                switch self.agent {
+                case .codex: root = TaskActivityReader.defaultRootURL
+                case .cursor: root = CursorIntegration.supportDirectoryURL
+                case .hermes: root = HermesIntegration.homeURL
+                }
                 let normalizedRoot = root.standardizedFileURL.resolvingSymlinksInPath().path
                 let relevantEvents = events.filter { $0.path.hasPrefix(normalizedRoot) }
                 guard !relevantEvents.isEmpty else { return }
@@ -1049,6 +1243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let snapshot = await Task.detached(priority: .utility) {
             switch selectedAgent {
             case .cursor: return CursorActivityReader.read()
+            case .hermes: return HermesActivityReader.read()
             case .codex:
                 return TaskActivityReader.read(
                     fileEvents: fileEvents,
@@ -1135,6 +1330,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             officialUsage: latestOfficialUsage,
             cursorOfficialUsage: latestCursorOfficialUsage,
             cursorProviderUsage: latestCursorProviderUsage,
+            hermesStatus: latestHermesStatus,
+            hermesUsage: latestHermesUsage,
             task: taskSnapshot
         )
     }
@@ -1164,6 +1361,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.open(URL(string: "https://cursor.com/dashboard?tab=usage")!)
             return
         }
+        if agent == .hermes {
+            if let id = HermesPreference.providerID,
+               let provider = ProviderStore.provider(id: id),
+               let url = URL(string: provider.baseURL) {
+                NSWorkspace.shared.open(url)
+            } else {
+                Task { try? await HermesLauncher.launch() }
+            }
+            return
+        }
         switch route {
         case .official:
             NSWorkspace.shared.open(URL(string: "https://chatgpt.com/codex/settings/usage")!)
@@ -1179,6 +1386,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Task {
                 do {
                     try await CursorLauncher.launch()
+                } catch {
+                    presentLaunchWarning(error.localizedDescription)
+                }
+            }
+        } else if agent == .hermes {
+            Task {
+                do {
+                    try await HermesLauncher.launch()
                 } catch {
                     presentLaunchWarning(error.localizedDescription)
                 }

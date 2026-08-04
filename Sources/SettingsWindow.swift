@@ -893,7 +893,7 @@ final class SettingsWindowController: NSWindowController {
             return
         }
 
-        let visibleProviders = providers.filter { $0.supports(.codex) }
+        let visibleProviders = providers.filter { $0.supports(agent) }
         for provider in visibleProviders {
             let row = makeModelRow(provider: provider, agent: agent)
             modelListStack.addArrangedSubview(row)
@@ -1091,14 +1091,28 @@ final class SettingsWindowController: NSWindowController {
                 ) ?? NSImage(systemSymbolName: "server.rack", accessibilityDescription: provider.name)!
             }
         } else {
-            let applicationURL = agent == .codex
-                ? NSWorkspace.shared.urlForApplication(withBundleIdentifier: CodexLauncher.bundleIdentifier)
-                : CursorLauncher.applicationURL()
+            let applicationURL: URL?
+            switch agent {
+            case .codex:
+                applicationURL = NSWorkspace.shared.urlForApplication(
+                    withBundleIdentifier: CodexLauncher.bundleIdentifier
+                )
+            case .cursor:
+                applicationURL = CursorLauncher.applicationURL()
+            case .hermes:
+                applicationURL = HermesLauncher.applicationURL()
+            }
             if let applicationURL {
                 image = NSWorkspace.shared.icon(forFile: applicationURL.path)
             } else {
+                let symbol: String
+                switch agent {
+                case .codex: symbol = "terminal.fill"
+                case .cursor: symbol = "cursorarrow.rays"
+                case .hermes: symbol = "sparkles"
+                }
                 image = NSImage(
-                    systemSymbolName: agent == .codex ? "terminal.fill" : "cursorarrow.rays",
+                    systemSymbolName: symbol,
                     accessibilityDescription: agent.displayName
                 )!
             }
@@ -1136,15 +1150,32 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private func officialProviderName(for agent: AgentKind) -> String {
-        agent == .codex ? "OpenAI 官方" : "Cursor 官方"
+        switch agent {
+        case .codex: return "OpenAI 官方"
+        case .cursor: return "Cursor 官方"
+        case .hermes: return "Hermes 当前配置"
+        }
     }
 
     private func officialModelDescription(for agent: AgentKind) -> String {
-        agent == .codex ? (ProviderStore.officialModel() ?? "ChatGPT 登录模型") : "Cursor 官方模型"
+        switch agent {
+        case .codex:
+            return ProviderStore.officialModel() ?? "ChatGPT 登录模型"
+        case .cursor:
+            return "Cursor 官方模型"
+        case .hermes:
+            let config = HermesIntegration.readModelConfig()
+            return "\(config.provider) · \(config.model)"
+        }
     }
 
     private func balanceText(for provider: ProviderProfile?, agent: AgentKind) -> String {
         guard let provider else {
+            if agent == .hermes {
+                guard AgentPreference.selected == .hermes,
+                      let snapshot = appDelegate?.dashboardSnapshot() else { return "应用后读取" }
+                return snapshot.usageValue == "—" ? "Token —" : "Token \(snapshot.usageValue)"
+            }
             if agent == .cursor && AgentPreference.selected != .cursor {
                 return "应用后读取"
             }
@@ -1166,6 +1197,10 @@ final class SettingsWindowController: NSWindowController {
         if agent == .codex {
             if key == "official" { return routeControl.selectedSegment == 0 }
             return routeControl.selectedSegment == 1 && selectedProviderID == key
+        }
+        if agent == .hermes {
+            if key == "official" { return selectedProviderID == nil }
+            return selectedProviderID == key
         }
         return key == "official"
     }
@@ -1219,6 +1254,13 @@ final class SettingsWindowController: NSWindowController {
             statusLabel.stringValue = "Cursor 已使用官方连接；自定义模型请在 Cursor Models 中配置。"
             return
         }
+        if agent == .hermes {
+            selectedProviderID = sender.representsOfficial ? nil : sender.providerID
+            reloadProviderPopups()
+            reloadModelList()
+            statusLabel.stringValue = "已选择模型，点击“应用并打开”使配置生效；运行中的任务不会重启。"
+            return
+        }
         if sender.representsOfficial {
             selectedProviderID = nil
             routeControl.selectedSegment = 0
@@ -1243,8 +1285,14 @@ final class SettingsWindowController: NSWindowController {
                     if agent == .codex {
                         let usage = try await OfficialUsageClient.fetch()
                         guard usage.isLoggedIn else { throw SettingsError.officialNotLoggedIn }
-                    } else {
+                    } else if agent == .cursor {
                         _ = try await CursorOfficialUsageClient.fetch()
+                    } else {
+                        let status = HermesIntegration.readStatus()
+                        guard status.isInstalled, status.cliAvailable,
+                              status.modelConfig != .unavailable else {
+                            throw HermesIntegrationError.invalidConfiguration
+                        }
                     }
                     showSuccess("\(officialProviderName(for: agent))连接正常。")
                     return
@@ -1278,7 +1326,7 @@ final class SettingsWindowController: NSWindowController {
     }
 
     @objc private func openAddProviderPage() {
-        guard selectedAgent() == .codex else {
+        guard selectedAgent() != .cursor else {
             statusLabel.stringValue = "Cursor 的第三方模型请在 Cursor Models 中配置。"
             return
         }
@@ -1905,9 +1953,16 @@ final class SettingsWindowController: NSWindowController {
         let route = RouteConfigManager.currentRoute()
         routeControl.selectedSegment = route == .official ? 0 : 1
         cursorOfficialUsageSwitch.state = .on
-        if selectedAgent == .codex,
-                  case let .provider(id) = route,
-                  providers.contains(where: { $0.id == id && $0.supports(.codex) }) {
+        if selectedAgent == .codex {
+            if case let .provider(id) = route,
+               providers.contains(where: { $0.id == id && $0.supports(.codex) }) {
+                selectedProviderID = id
+            } else {
+                selectedProviderID = nil
+            }
+        } else if selectedAgent == .hermes,
+                  let id = HermesPreference.providerID,
+                  providers.contains(where: { $0.id == id && $0.supports(.hermes) }) {
             selectedProviderID = id
         } else {
             selectedProviderID = nil
@@ -1994,7 +2049,7 @@ final class SettingsWindowController: NSWindowController {
     }
 
     func presentVersionUpdatePreview() {
-        let status = AppUpdateStatus(currentVersion: "2.9.0", latestVersion: "2.10.0")
+        let status = AppUpdateStatus(currentVersion: "3.0.0", latestVersion: "3.1.0")
         availableUpdate = status
         installUpdateButton.title = "更新到 \(status.latestVersion)"
         installUpdateButton.isHidden = false
@@ -2056,6 +2111,13 @@ final class SettingsWindowController: NSWindowController {
             routeControl.selectedSegment = route == .official ? 0 : 1
             if case let .provider(id) = route,
                providers.contains(where: { $0.id == id && $0.supports(.codex) }) {
+                selectedProviderID = id
+            } else {
+                selectedProviderID = nil
+            }
+        } else if agent == .hermes {
+            if let id = HermesPreference.providerID,
+               providers.contains(where: { $0.id == id && $0.supports(.hermes) }) {
                 selectedProviderID = id
             } else {
                 selectedProviderID = nil
@@ -2346,6 +2408,10 @@ final class SettingsWindowController: NSWindowController {
             showError("当前正在使用该提供商，请先切换到其他路由。")
             return
         }
+        if HermesPreference.providerID == id {
+            showError("Hermes 当前正在使用该提供商，请先切换到 Hermes 当前配置或其他模型。")
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "删除 \(providers[index].name)？"
         alert.informativeText = "对应的本地 API Key 也会被删除。"
@@ -2500,6 +2566,10 @@ final class SettingsWindowController: NSWindowController {
             confirmCursorSelection()
             return
         }
+        if selectedAgent() == .hermes {
+            confirmHermesSelection()
+            return
+        }
         confirmButton.isEnabled = false
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.stringValue = "正在更新路由…"
@@ -2603,6 +2673,42 @@ final class SettingsWindowController: NSWindowController {
                 showSuccess(restartRequired
                     ? "Cursor 已连接；Hooks 将在下次手动重启 Cursor 后生效。"
                     : "Cursor 已连接，用量与状态同步已启用。")
+                confirmButton.title = "连接成功"
+                window?.close()
+            } catch {
+                showError(error.localizedDescription)
+                confirmButton.isEnabled = true
+                updateConfirmButtonTitle()
+            }
+        }
+    }
+
+    private func confirmHermesSelection() {
+        confirmButton.isEnabled = false
+        confirmButton.title = "正在配置…"
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.stringValue = "正在更新 Hermes 模型配置…"
+
+        Task {
+            do {
+                if let id = selectedProviderID {
+                    guard let profile = providers.first(where: {
+                        $0.id == id && $0.supports(.hermes)
+                    }) else { throw SettingsError.noProvider }
+                    guard let key = CredentialStore.load(providerID: id), !key.isEmpty else {
+                        throw SettingsError.missingCredential
+                    }
+                    try HermesIntegration.apply(profile: profile, apiKey: key)
+                    HermesPreference.providerID = id
+                } else {
+                    try HermesIntegration.restoreOriginalConfiguration()
+                    HermesPreference.providerID = nil
+                }
+                AgentPreference.selected = .hermes
+                appDelegate?.agentDidChange(to: .hermes)
+                statusLabel.stringValue = "正在打开 Hermes…"
+                try await HermesLauncher.launch()
+                showSuccess("Hermes 已连接；新模型将在下一次请求中生效，运行中的任务保持不变。")
                 confirmButton.title = "连接成功"
                 window?.close()
             } catch {

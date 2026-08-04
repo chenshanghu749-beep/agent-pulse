@@ -186,8 +186,8 @@ struct ProviderProfile: Codable, Equatable, Identifiable, Sendable {
     }
 
     var boundAgents: Set<AgentKind> {
-        let configured = agents ?? AgentKind.allCases
-        return Set(configured.isEmpty ? AgentKind.allCases : configured)
+        let configured = agents ?? [.codex, .cursor]
+        return Set(configured.isEmpty ? [.codex, .cursor] : configured)
     }
 
     func supports(_ agent: AgentKind) -> Bool {

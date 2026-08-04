@@ -4,11 +4,13 @@ import Foundation
 enum AgentKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
     case codex
     case cursor
+    case hermes
 
     var displayName: String {
         switch self {
         case .codex: return "Codex"
         case .cursor: return "Cursor"
+        case .hermes: return "Hermes"
         }
     }
 }

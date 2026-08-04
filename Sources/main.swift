@@ -653,9 +653,9 @@ if CommandLine.arguments.contains("--login-status-test") {
         baseURL: "https://api.example.com/v1",
         model: "custom-model"
     )
-    let updateFixture = AppUpdateStatus(currentVersion: "2.9.0", latestVersion: "2.10.0")
+    let updateFixture = AppUpdateStatus(currentVersion: "3.0.0", latestVersion: "3.1.0")
     guard updateFixture.updateAvailable,
-          updateFixture.installerURL.absoluteString.hasSuffix("/dist/Agent-Pulse-2.10.0.dmg") else {
+          updateFixture.installerURL.absoluteString.hasSuffix("/dist/Agent-Pulse-3.1.0.dmg") else {
         print("SELF_TEST_ERROR update metadata")
         exit(EXIT_FAILURE)
     }
@@ -1406,6 +1406,118 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(cursorTeamUsage.usedCents == 300)
     precondition(cursorTeamUsage.remainingCents == 700)
     precondition(cursorTeamUsage.remainingPercent == 70)
+
+    precondition(AgentKind.allCases.contains(.hermes))
+    let legacyAgentBinding = ProviderProfile(
+        id: "legacy-agent-binding",
+        name: "Legacy",
+        baseURL: "https://example.com/v1",
+        model: "example-model"
+    )
+    precondition(legacyAgentBinding.supports(.codex))
+    precondition(legacyAgentBinding.supports(.cursor))
+    precondition(!legacyAgentBinding.supports(.hermes))
+    var emptyLegacyAgentBinding = legacyAgentBinding
+    emptyLegacyAgentBinding.agents = []
+    precondition(!emptyLegacyAgentBinding.supports(.hermes))
+
+    let hermesTestRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("agent-pulse-hermes-test-\(UUID().uuidString)", isDirectory: true)
+    try! FileManager.default.createDirectory(at: hermesTestRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: hermesTestRoot) }
+    let hermesConfigURL = hermesTestRoot.appendingPathComponent("config.yaml")
+    try! Data("""
+    model:
+      default: deepseek-chat
+      provider: custom
+      base_url: https://api.deepseek.com/v1
+      api_mode: responses
+    terminal: true
+    """.utf8).write(to: hermesConfigURL)
+    let hermesConfig = HermesIntegration.readModelConfig(at: hermesConfigURL)
+    precondition(hermesConfig.model == "deepseek-chat")
+    precondition(hermesConfig.provider == "custom")
+    precondition(hermesConfig.baseURL == "https://api.deepseek.com/v1")
+    precondition(hermesConfig.apiMode == "responses")
+
+    let hermesGatewayURL = hermesTestRoot.appendingPathComponent("gateway_state.json")
+    try! Data("{\"active_agents\":0,\"updated_at\":\"2026-08-03T12:00:00Z\"}".utf8)
+        .write(to: hermesGatewayURL)
+    precondition(HermesActivityReader.read(gatewayStateURL: hermesGatewayURL).state == .ready)
+
+    let hermesDatabaseURL = hermesTestRoot.appendingPathComponent("state.db")
+    let hermesFixtureTimestamp = Date().timeIntervalSince1970
+    let hermesSQL = """
+    CREATE TABLE messages (
+      role TEXT NOT NULL,
+      tool_name TEXT,
+      tool_calls TEXT,
+      timestamp REAL NOT NULL
+    );
+    INSERT INTO messages VALUES ('tool', 'shell', NULL, \(hermesFixtureTimestamp));
+    CREATE TABLE session_model_usage (
+      input_tokens INTEGER NOT NULL,
+      output_tokens INTEGER NOT NULL,
+      cache_read_tokens INTEGER NOT NULL,
+      reasoning_tokens INTEGER NOT NULL,
+      api_call_count INTEGER NOT NULL,
+      estimated_cost_usd REAL NOT NULL,
+      actual_cost_usd REAL NOT NULL,
+      last_seen REAL
+    );
+    INSERT INTO session_model_usage VALUES (100, 50, 25, 10, 3, 0.12, 0.10, \(hermesFixtureTimestamp));
+    """
+    let hermesSQLite = Process()
+    hermesSQLite.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+    hermesSQLite.arguments = [hermesDatabaseURL.path, hermesSQL]
+    try! hermesSQLite.run()
+    hermesSQLite.waitUntilExit()
+    precondition(hermesSQLite.terminationStatus == 0)
+    try! Data("{\"active_agents\":1,\"updated_at\":\"2026-08-03T12:00:00Z\"}".utf8)
+        .write(to: hermesGatewayURL)
+    precondition(HermesActivityReader.read(
+        gatewayStateURL: hermesGatewayURL,
+        stateDatabaseURL: hermesDatabaseURL
+    ).state == .waiting(1))
+    let hermesUsage = HermesUsageReader.readToday(databaseURL: hermesDatabaseURL)!
+    precondition(hermesUsage.inputTokens == 100)
+    precondition(hermesUsage.outputTokens == 50)
+    precondition(hermesUsage.totalTokens == 185)
+    precondition(hermesUsage.apiCalls == 3)
+    precondition(abs(hermesUsage.displayCostUSD - 0.10) < 0.0001)
+    let hermesBalancePresentation = HermesDashboardPresentation.make(
+        providerName: "DeepSeek",
+        config: hermesConfig,
+        usage: hermesUsage,
+        codeBalance: nil,
+        providerBalance: ProviderBalanceSnapshot(
+            displayText: "余额 ¥88.00",
+            detail: "充值余额，不含赠送额度"
+        )
+    )
+    precondition(hermesBalancePresentation.usageLabel == "提供商余额")
+    precondition(hermesBalancePresentation.usageValue == "¥88.00")
+    precondition(hermesBalancePresentation.usageDetail.contains("185 Token"))
+    precondition(hermesBalancePresentation.statusValue == "¥88.00")
+    let hermesCodeBalancePresentation = HermesDashboardPresentation.make(
+        providerName: "自定义提供商",
+        config: hermesConfig,
+        usage: hermesUsage,
+        codeBalance: 42.5,
+        providerBalance: nil
+    )
+    precondition(hermesCodeBalancePresentation.usageLabel == "提供商余额")
+    precondition(hermesCodeBalancePresentation.usageValue == "$42.50")
+    let hermesTokenFallback = HermesDashboardPresentation.make(
+        providerName: "无余额接口",
+        config: hermesConfig,
+        usage: hermesUsage,
+        codeBalance: nil,
+        providerBalance: nil
+    )
+    precondition(hermesTokenFallback.usageLabel == "今日 Token")
+    precondition(hermesTokenFallback.usageValue == "185")
+    precondition(hermesTokenFallback.statusValue == "185 Token")
     print("SELF_TEST_OK")
 } else {
     MainActor.assumeIsolated {

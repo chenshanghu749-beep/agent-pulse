@@ -35,7 +35,7 @@ enum ProviderConnectionTester {
         request.timeoutInterval = 15
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Agent-Pulse/2.9.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Agent-Pulse/3.0.0", forHTTPHeaderField: "User-Agent")
 
         let usesChatCompletions = profile.effectiveVendor == .zhipuAI
         let body: [String: Any]
@@ -82,7 +82,7 @@ enum ProviderConnectionTester {
         request.timeoutInterval = 10
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Agent-Pulse/2.9.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Agent-Pulse/3.0.0", forHTTPHeaderField: "User-Agent")
 
         let (data, response): (Data, URLResponse)
         do {

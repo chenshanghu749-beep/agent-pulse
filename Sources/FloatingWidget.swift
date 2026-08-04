@@ -48,6 +48,8 @@ enum AgentPulseWidgetStore {
         officialUsage: OfficialUsageSnapshot?,
         cursorOfficialUsage: CursorOfficialUsageSnapshot?,
         cursorProviderUsage: UsageResponse?,
+        hermesStatus: HermesStatus?,
+        hermesUsage: HermesUsageSnapshot?,
         task: TaskActivitySnapshot
     ) {
         var routeName = "Codex · \(route.displayName)"
@@ -91,6 +93,22 @@ enum AgentPulseWidgetStore {
                 primaryValue = "Cursor"
                 primaryLabel = "当前 Agent"
                 detail = "状态 Hooks · 自动同步"
+            }
+        } else if agent == .hermes {
+            let config = hermesStatus?.modelConfig ?? .unavailable
+            routeName = "Hermes · \(config.provider)"
+            modelName = config.model
+            if let hermesUsage {
+                primaryValue = formattedNumber(hermesUsage.totalTokens)
+                primaryLabel = "今日 Token"
+                detail = "\(hermesUsage.apiCalls) 次请求 · $\(String(format: "%.2f", hermesUsage.displayCostUSD))"
+                inputTokens = hermesUsage.inputTokens
+                outputTokens = hermesUsage.outputTokens
+                totalTokens = hermesUsage.totalTokens
+            } else {
+                primaryValue = "Hermes"
+                primaryLabel = "当前 Agent"
+                detail = hermesStatus?.detail ?? "等待 Hermes 数据"
             }
         } else {
             switch route {
@@ -160,5 +178,11 @@ enum AgentPulseWidgetStore {
             return
         }
         WidgetCenter.shared.reloadTimelines(ofKind: kind)
+    }
+
+    private static func formattedNumber(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 }
