@@ -208,7 +208,7 @@ enum ProviderBalanceClient {
         request.timeoutInterval = 15
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Agent-Pulse/3.0.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Agent-Pulse/3.0.1", forHTTPHeaderField: "User-Agent")
         if acceptLanguage { request.setValue("zh-CN,zh;q=0.9,en;q=0.7", forHTTPHeaderField: "Accept-Language") }
 
         let configuration = URLSessionConfiguration.ephemeral

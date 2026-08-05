@@ -2049,7 +2049,7 @@ final class SettingsWindowController: NSWindowController {
     }
 
     func presentVersionUpdatePreview() {
-        let status = AppUpdateStatus(currentVersion: "3.0.0", latestVersion: "3.1.0")
+        let status = AppUpdateStatus(currentVersion: "3.0.1", latestVersion: "3.1.0")
         availableUpdate = status
         installUpdateButton.title = "更新到 \(status.latestVersion)"
         installUpdateButton.isHidden = false

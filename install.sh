@@ -3,10 +3,10 @@ set -euo pipefail
 
 readonly APP_NAME="Agent Pulse.app"
 readonly LEGACY_APP_NAME="Codex Pulse.app"
-readonly VERSION="3.0.0"
+readonly VERSION="3.0.1"
 readonly DMG_NAME="Agent-Pulse-${VERSION}.dmg"
 readonly DMG_URL="https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/main/dist/${DMG_NAME}"
-readonly EXPECTED_SHA256="965cf02c887a0683e09758f7dbb6e478634cfc7e2234e4c9fa1414959812ef6b"
+readonly EXPECTED_SHA256="e1ab8b29a990ce8813a15ef79c4514bf9e4f72a7f20ef11330743b64b2e5030d"
 
 install_dir="${AGENT_PULSE_INSTALL_DIR:-${CODEX_PULSE_INSTALL_DIR:-${CODEAPI_STATUS_INSTALL_DIR:-$HOME/Applications}}}"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-pulse-install.XXXXXX")"

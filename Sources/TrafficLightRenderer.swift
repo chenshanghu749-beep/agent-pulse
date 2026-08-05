@@ -20,6 +20,7 @@ enum StatusIconStyle: String, CaseIterable {
     case basketballMascot
     case trumpMascot
     case pinwheel
+    case gears
     case statusRing
 
     var displayName: String {
@@ -29,8 +30,13 @@ enum StatusIconStyle: String, CaseIterable {
         case .basketballMascot: return "篮球伙伴"
         case .trumpMascot: return "特朗普舞者"
         case .pinwheel: return "旋转风车"
+        case .gears: return "旋转齿轮"
         case .statusRing: return "状态圆环"
         }
+    }
+
+    var usesCompositeStatusItemImage: Bool {
+        self == .pinwheel || self == .gears
     }
 
     func animationFramesPerSecond(for signal: TrafficSignal) -> Double {
@@ -40,6 +46,12 @@ enum StatusIconStyle: String, CaseIterable {
             case .red: return 30
             case .yellow: return 28
             case .green: return 24
+            }
+        case .gears:
+            switch signal {
+            case .red: return 30
+            case .yellow: return 24
+            case .green: return 12
             }
         case .basketballMascot, .trumpMascot:
             switch signal {
@@ -96,6 +108,15 @@ enum StatusIconRenderer {
             }
             let phase = Int((Double(frame) * degreesPerSecond / 75).rounded(.down))
             return phase % 72
+        case .gears:
+            let degreesPerSecond: Double
+            switch active {
+            case .red: degreesPerSecond = 300
+            case .yellow: degreesPerSecond = 140
+            case .green: degreesPerSecond = 30
+            }
+            let phase = Int((Double(frame) * degreesPerSecond / 180).rounded(.down))
+            return phase % 120
         case .trafficLight, .lightBulb, .statusRing:
             return 0
         }
@@ -116,6 +137,7 @@ enum StatusIconRenderer {
         case .basketballMascot: image = basketballMascot(active: active, frame: phase)
         case .trumpMascot: image = trumpMascot(active: active, frame: phase)
         case .pinwheel: image = pinwheel(active: active, phase: phase, phaseCount: 72)
+        case .gears: image = gears(active: active, phase: phase, phaseCount: 120)
         case .statusRing: image = statusRing(active: active)
         }
         image.isTemplate = false
@@ -730,6 +752,69 @@ enum StatusIconRenderer {
         NSColor.labelColor.withAlphaComponent(0.92).setStroke()
         hub.lineWidth = 1.2
         hub.stroke()
+    }
+
+    private static func gears(active _: TrafficSignal, phase: Int, phaseCount: CGFloat) -> NSImage {
+        canvas(width: 29) { _ in
+            let rotation = CGFloat(phase) / phaseCount * 360
+            drawGear(
+                center: NSPoint(x: 10.3, y: 7.7),
+                outerRadius: 7.0,
+                rootRadius: 5.35,
+                holeRadius: 2.15,
+                teeth: 10,
+                rotation: rotation
+            )
+            drawGear(
+                center: NSPoint(x: 21.2, y: 13.0),
+                outerRadius: 4.45,
+                rootRadius: 3.25,
+                holeRadius: 1.35,
+                teeth: 8,
+                rotation: -rotation * 1.25 + 11.25
+            )
+        }
+    }
+
+    private static func drawGear(
+        center: NSPoint,
+        outerRadius: CGFloat,
+        rootRadius: CGFloat,
+        holeRadius: CGFloat,
+        teeth: Int,
+        rotation: CGFloat
+    ) {
+        let path = NSBezierPath()
+        let pointsPerTooth = 4
+        let pointCount = teeth * pointsPerTooth
+        for index in 0..<pointCount {
+            let position = index % pointsPerTooth
+            let radius: CGFloat = position == 1 || position == 2 ? outerRadius : rootRadius
+            let angle = rotation * .pi / 180
+                + CGFloat(index) / CGFloat(pointCount) * .pi * 2
+                - .pi / 2
+            let point = NSPoint(
+                x: center.x + cos(angle) * radius,
+                y: center.y + sin(angle) * radius
+            )
+            if index == 0 { path.move(to: point) }
+            else { path.line(to: point) }
+        }
+        path.close()
+        NSColor.labelColor.withAlphaComponent(0.94).setFill()
+        path.fill()
+
+        let hole = NSBezierPath(ovalIn: NSRect(
+            x: center.x - holeRadius,
+            y: center.y - holeRadius,
+            width: holeRadius * 2,
+            height: holeRadius * 2
+        ))
+        NSColor.windowBackgroundColor.setFill()
+        hole.fill()
+        NSColor.labelColor.withAlphaComponent(0.88).setStroke()
+        hole.lineWidth = 0.8
+        hole.stroke()
     }
 
     private static func statusRing(active: TrafficSignal) -> NSImage {

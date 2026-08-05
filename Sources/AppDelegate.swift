@@ -496,7 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let titleChanged = title != statusTitleText
         statusTitleText = title
         button.toolTip = toolTip
-        if statusIconStyle == .pinwheel {
+        if statusIconStyle.usesCompositeStatusItemImage {
             button.title = ""
             if titleChanged {
                 lastStatusRenderKey = nil
@@ -586,9 +586,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func displayStatusImage(_ image: NSImage, in button: NSStatusBarButton) {
-        if statusIconStyle == .pinwheel {
+        if statusIconStyle.usesCompositeStatusItemImage {
             let composite = StatusIconRenderer.statusItemImage(
-                style: .pinwheel,
+                style: statusIconStyle,
                 active: targetSignal,
                 frame: animationFrame,
                 title: statusTitleText,
@@ -625,7 +625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func syncIconAnimationTimer() {
-        let transitionActive = statusIconStyle != .pinwheel
+        let transitionActive = !statusIconStyle.usesCompositeStatusItemImage
             && Date().timeIntervalSince(transitionStartedAt) < 0.28
         let desiredFPS = transitionActive
             ? 16
@@ -649,10 +649,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func iconAnimationTick() {
         let elapsed = ProcessInfo.processInfo.systemUptime - iconAnimationStartUptime
         animationFrame = Int(elapsed * 60)
-        if statusIconStyle == .pinwheel,
+        if statusIconStyle.usesCompositeStatusItemImage,
            let button = statusItem?.button {
             button.image = StatusIconRenderer.statusItemImage(
-                style: .pinwheel,
+                style: statusIconStyle,
                 active: targetSignal,
                 frame: animationFrame,
                 title: statusTitleText,

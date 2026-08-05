@@ -561,7 +561,12 @@ if CommandLine.arguments.contains("--login-status-test") {
         print("MODEL_CATALOG_ERROR \(error.localizedDescription)")
         exit(EXIT_FAILURE)
     }
-} else if CommandLine.arguments.contains("--pinwheel-preview") {
+} else if CommandLine.arguments.contains("--pinwheel-preview")
+            || CommandLine.arguments.contains("--gears-preview") {
+    let previewStyle: StatusIconStyle = CommandLine.arguments.contains("--gears-preview")
+        ? .gears
+        : .pinwheel
+    let previewName = previewStyle == .gears ? "gears" : "pinwheel"
     let scale: CGFloat = 8
     let cellSize = NSSize(width: 34 * scale, height: 24 * scale)
     let preview = NSImage(
@@ -572,9 +577,9 @@ if CommandLine.arguments.contains("--login-status-test") {
         rect.fill()
         for (index, signal) in TrafficSignal.allCases.enumerated() {
             let icon = StatusIconRenderer.image(
-                style: .pinwheel,
+                style: previewStyle,
                 active: signal,
-                frame: index * 3
+                frame: previewStyle == .gears ? index * 18 + 12 : index * 3
             )
             let target = NSRect(
                 x: CGFloat(index) * cellSize.width + (cellSize.width - icon.size.width * scale) / 2,
@@ -586,15 +591,15 @@ if CommandLine.arguments.contains("--login-status-test") {
         }
         return true
     }
-    let outputURL = URL(fileURLWithPath: "/tmp/agent-pulse-pinwheel-preview.png")
+    let outputURL = URL(fileURLWithPath: "/tmp/agent-pulse-\(previewName)-preview.png")
     guard let tiff = preview.tiffRepresentation,
           let bitmap = NSBitmapImageRep(data: tiff),
           let png = bitmap.representation(using: .png, properties: [:]) else {
-        print("PINWHEEL_PREVIEW_ERROR 无法生成预览图")
+        print("STATUS_PREVIEW_ERROR 无法生成预览图")
         exit(EXIT_FAILURE)
     }
     try! png.write(to: outputURL, options: .atomic)
-    print("PINWHEEL_PREVIEW_OK \(outputURL.path)")
+    print("STATUS_PREVIEW_OK \(outputURL.path)")
 } else if CommandLine.arguments.contains("--install-cursor-hooks") {
     do {
         try CursorIntegration.installHooks()
@@ -653,7 +658,7 @@ if CommandLine.arguments.contains("--login-status-test") {
         baseURL: "https://api.example.com/v1",
         model: "custom-model"
     )
-    let updateFixture = AppUpdateStatus(currentVersion: "3.0.0", latestVersion: "3.1.0")
+    let updateFixture = AppUpdateStatus(currentVersion: "3.0.1", latestVersion: "3.1.0")
     guard updateFixture.updateAvailable,
           updateFixture.installerURL.absoluteString.hasSuffix("/dist/Agent-Pulse-3.1.0.dmg") else {
         print("SELF_TEST_ERROR update metadata")
@@ -1035,6 +1040,26 @@ if CommandLine.arguments.contains("--login-status-test") {
         frame: 12
     ).size.width)
     precondition(compositeStatusImage.tiffRepresentation != nil)
+    precondition(StatusIconStyle.gears.usesCompositeStatusItemImage)
+    let gearRedPhase = StatusIconRenderer.animationPhase(style: .gears, active: .red, frame: 18)
+    let gearYellowPhase = StatusIconRenderer.animationPhase(style: .gears, active: .yellow, frame: 18)
+    let gearGreenPhase = StatusIconRenderer.animationPhase(style: .gears, active: .green, frame: 18)
+    precondition(gearRedPhase > gearYellowPhase)
+    precondition(gearYellowPhase > gearGreenPhase)
+    let gearStatusImage = StatusIconRenderer.statusItemImage(
+        style: .gears,
+        active: .red,
+        frame: 18,
+        title: "Hermes · ¥88.00",
+        font: .systemFont(ofSize: 12, weight: .medium)
+    )
+    precondition(gearStatusImage.size.height == 18)
+    precondition(gearStatusImage.size.width > StatusIconRenderer.image(
+        style: .gears,
+        active: .red,
+        frame: 18
+    ).size.width)
+    precondition(gearStatusImage.tiffRepresentation != nil)
 
     let taskRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("agent-pulse-task-test-\(UUID().uuidString)", isDirectory: true)
