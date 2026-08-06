@@ -208,10 +208,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             await refreshUsage()
         }
 
+        // Route changes must never inspect or mutate the Codex session database.
+        // Legacy-session migration is intentionally kept out of startup; it can
+        // be reintroduced later as an explicit, advanced recovery action.
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.offerLegacySessionMigrationIfNeeded()
-            self.settings.present()
+            self?.settings.present()
         }
     }
 

@@ -55,8 +55,8 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 | 用量与仪表盘 | 集中查看官方用量、提供商余额，以及 Hermes 本地 Token、请求与费用 |
 | 任务状态 | 支持 Codex 日志、Cursor Hooks 与 Hermes Gateway；红色执行、黄色工具、绿色完成 |
 | 状态外观 | 多种菜单栏状态图标，使用紧凑的五列宫格快速预览和切换 |
-| 会话保持 | 不改写 Codex、Cursor 或 Hermes 的会话数据库 |
-| 旧会话兼容 | 首次启动检测旧第三方会话，经用户确认后创建 OpenAI 兼容副本，并保留完整备份 |
+| 会话保持 | 路由切换不改写 Codex、Cursor 或 Hermes 的会话数据库 |
+| model_provider | 首次启动读取 Codex 当前配置，可在模型与路由页面中修改并恢复为 openai |
 
 第三方路由统一通过厂商原生 Responses API 直连，不启动本地协议桥接服务。阿里百炼云预设可直接使用 Responses API；智谱 AI 的连接测试会按官方 Chat Completions 接口验证 API Key 与模型，但在智谱开放 Responses API 前不能作为 Codex 直连路由。所有提供商均可在启用前测试 Base URL、API Key 与模型。
 
@@ -102,7 +102,7 @@ chmod +x build.sh package.sh
 - Cursor 官方用量需用户明确授权；登录令牌仅在请求期间保留于内存，不会复制或持久化。
 - Cursor Hooks 只记录执行、工具和完成状态，不记录提示词、回复或会话内容。
 - Hermes 模型切换前会在 `~/.hermes/` 保存权限为 `600` 的本地恢复快照；切回“当前配置”时自动恢复。
-- 旧会话迁移只在用户确认后执行；源会话保持不变，数据库、配置和源 JSONL 会先保存到本地备份目录。
+- 普通启动和路由切换不会迁移、复制或改写旧会话；`model_provider` 修改只写入 `config.toml`，并先保存配置备份。
 - 进入第三方路由前会备份官方登录，切回官方时自动恢复并隔离第三方 API Key。
 - 应用不使用 macOS 钥匙串，不会反复触发钥匙串授权弹窗。
 

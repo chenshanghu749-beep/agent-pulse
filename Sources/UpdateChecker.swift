@@ -50,7 +50,8 @@ enum AppUpdateError: LocalizedError {
 struct PreparedAppUpdate: Sendable {
     let helperURL: URL
     let currentAppURL: URL
-    let stagedAppURL: URL
+    let installerURL: URL
+    let expectedVersion: String
     let workingDirectoryURL: URL
 
     func launch() throws {
@@ -60,7 +61,9 @@ struct PreparedAppUpdate: Sendable {
             helperURL.path,
             String(ProcessInfo.processInfo.processIdentifier),
             currentAppURL.path,
-            stagedAppURL.path,
+            installerURL.absoluteString,
+            expectedVersion,
+            AppIdentity.bundleIdentifier,
             workingDirectoryURL.path
         ]
         do {
@@ -102,10 +105,18 @@ enum AppUpdateChecker {
 }
 
 enum AppUpdateInstaller {
-    private static let appName = "Agent Pulse.app"
-
     static func validateHelperScriptForTesting() throws {
         try run("/bin/zsh", ["-n", "-c", helperScript])
+        let requiredSteps = [
+            "/usr/bin/curl",
+            "/usr/bin/hdiutil verify",
+            "expected_bundle_id",
+            "/usr/bin/codesign --verify",
+            "/usr/bin/open \"$target_app\""
+        ]
+        guard requiredSteps.allSatisfy(helperScript.contains) else {
+            throw AppUpdateError.invalidPackage("更新助手缺少必要步骤。")
+        }
     }
 
     static func prepare(_ status: AppUpdateStatus) async throws -> PreparedAppUpdate {
@@ -125,82 +136,22 @@ enum AppUpdateInstaller {
 
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("agent-pulse-update-\(UUID().uuidString)", isDirectory: true)
-        let dmgURL = root.appendingPathComponent("Agent-Pulse-\(status.latestVersion).dmg")
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            var request = URLRequest(url: status.installerURL)
-            request.timeoutInterval = 90
-            request.cachePolicy = .reloadIgnoringLocalCacheData
-            request.setValue("Agent-Pulse/\(status.currentVersion)", forHTTPHeaderField: "User-Agent")
-            let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = 90
-            configuration.timeoutIntervalForResource = 180
-            let session = URLSession(configuration: configuration)
-            defer { session.invalidateAndCancel() }
-            let (temporaryURL, response) = try await session.download(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw AppUpdateError.invalidResponse
-            }
-            try FileManager.default.moveItem(at: temporaryURL, to: dmgURL)
-            return try await Task.detached(priority: .userInitiated) {
-                try stage(
-                    dmgURL: dmgURL,
-                    root: root,
-                    currentAppURL: currentAppURL,
-                    expectedVersion: status.latestVersion
-                )
-            }.value
+            let helperURL = root.appendingPathComponent("install-update.zsh")
+            try helperScript.write(to: helperURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helperURL.path)
+            return PreparedAppUpdate(
+                helperURL: helperURL,
+                currentAppURL: currentAppURL,
+                installerURL: status.installerURL,
+                expectedVersion: status.latestVersion,
+                workingDirectoryURL: root
+            )
         } catch {
             try? FileManager.default.removeItem(at: root)
             throw error
         }
-    }
-
-    private static func stage(
-        dmgURL: URL,
-        root: URL,
-        currentAppURL: URL,
-        expectedVersion: String
-    ) throws -> PreparedAppUpdate {
-        try run("/usr/bin/hdiutil", ["verify", dmgURL.path])
-        let mountURL = root.appendingPathComponent("mount", isDirectory: true)
-        try FileManager.default.createDirectory(at: mountURL, withIntermediateDirectories: true)
-        var mounted = false
-        defer {
-            if mounted {
-                try? run("/usr/bin/hdiutil", ["detach", mountURL.path])
-            }
-        }
-        try run("/usr/bin/hdiutil", [
-            "attach", "-nobrowse", "-readonly", "-mountpoint", mountURL.path, dmgURL.path
-        ])
-        mounted = true
-
-        let sourceAppURL = mountURL.appendingPathComponent(appName, isDirectory: true)
-        let infoURL = sourceAppURL.appendingPathComponent("Contents/Info.plist")
-        guard let data = try? Data(contentsOf: infoURL),
-              let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              info["CFBundleIdentifier"] as? String == AppIdentity.bundleIdentifier,
-              info["CFBundleShortVersionString"] as? String == expectedVersion else {
-            throw AppUpdateError.invalidPackage("应用标识或版本号不匹配。")
-        }
-        try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", sourceAppURL.path])
-
-        let stagedAppURL = root.appendingPathComponent("Agent Pulse.new.app", isDirectory: true)
-        try run("/usr/bin/ditto", [sourceAppURL.path, stagedAppURL.path])
-        try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", stagedAppURL.path])
-        try run("/usr/bin/hdiutil", ["detach", mountURL.path])
-        mounted = false
-
-        let helperURL = root.appendingPathComponent("install-update.zsh")
-        try helperScript.write(to: helperURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helperURL.path)
-        return PreparedAppUpdate(
-            helperURL: helperURL,
-            currentAppURL: currentAppURL,
-            stagedAppURL: stagedAppURL,
-            workingDirectoryURL: root
-        )
     }
 
     private static func run(_ executable: String, _ arguments: [String]) throws {
@@ -230,21 +181,66 @@ set -euo pipefail
 
 pid="$1"
 target_app="$2"
-staged_app="$3"
-work_dir="$4"
+installer_url="$3"
+expected_version="$4"
+expected_bundle_id="$5"
+work_dir="$6"
 log_dir="$HOME/Library/Logs/Agent Pulse"
 log_file="$log_dir/update.log"
 /bin/mkdir -p "$log_dir"
 exec >>"$log_file" 2>&1
+
+dmg="$work_dir/Agent-Pulse-$expected_version.dmg"
+mount_dir="$work_dir/mount"
+staged_app="$work_dir/Agent Pulse.new.app"
+mounted=0
+
+cleanup_mount() {
+  if [[ "$mounted" == "1" ]]; then
+    /usr/bin/hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
+    mounted=0
+  fi
+}
+
+fail_update() {
+  print "$1"
+  cleanup_mount
+  [[ -d "$target_app" ]] && /usr/bin/open "$target_app" >/dev/null 2>&1 || true
+  /usr/bin/osascript -e 'display alert "Agent Pulse 更新失败" message "旧版本未被替换，请稍后重试或查看日志。"' >/dev/null 2>&1 || true
+  /bin/rm -rf "$work_dir"
+  exit 1
+}
 
 for _ in {1..120}; do
   /bin/kill -0 "$pid" 2>/dev/null || break
   /bin/sleep 0.1
 done
 if /bin/kill -0 "$pid" 2>/dev/null; then
-  print "等待 Agent Pulse 退出超时。"
-  exit 1
+  fail_update "等待 Agent Pulse 退出超时。"
 fi
+
+/usr/bin/osascript -e 'display notification "正在后台下载并安装新版本…" with title "Agent Pulse"' >/dev/null 2>&1 || true
+print "正在下载 Agent Pulse $expected_version…"
+/usr/bin/curl -fL --retry 3 --connect-timeout 15 --max-time 600 \
+  -A "Agent-Pulse-Updater/$expected_version" \
+  -o "$dmg" "$installer_url" || fail_update "更新包下载失败。"
+/usr/bin/hdiutil verify "$dmg" || fail_update "更新包校验失败。"
+/bin/mkdir -p "$mount_dir"
+/usr/bin/hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$dmg" \
+  || fail_update "无法挂载更新包。"
+mounted=1
+
+source_app="$mount_dir/Agent Pulse.app"
+info_plist="$source_app/Contents/Info.plist"
+[[ -f "$info_plist" ]] || fail_update "更新包中缺少 Agent Pulse.app。"
+actual_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist" 2>/dev/null || true)
+actual_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist" 2>/dev/null || true)
+[[ "$actual_bundle_id" == "$expected_bundle_id" ]] || fail_update "更新包应用标识不匹配。"
+[[ "$actual_version" == "$expected_version" ]] || fail_update "更新包版本号不匹配。"
+/usr/bin/codesign --verify --deep --strict "$source_app" || fail_update "更新包签名校验失败。"
+/usr/bin/ditto "$source_app" "$staged_app" || fail_update "无法准备新版应用。"
+/usr/bin/codesign --verify --deep --strict "$staged_app" || fail_update "新版应用签名校验失败。"
+cleanup_mount
 
 trash_dir="$HOME/.Trash"
 /bin/mkdir -p "$trash_dir"
@@ -254,16 +250,16 @@ if [[ -e "$backup_app" ]]; then
 fi
 
 if [[ -d "$target_app" ]]; then
-  /bin/mv "$target_app" "$backup_app"
+  /bin/mv "$target_app" "$backup_app" || fail_update "无法备份当前版本，更新已取消。"
 fi
 if ! /bin/mv "$staged_app" "$target_app"; then
   [[ -d "$backup_app" ]] && /bin/mv "$backup_app" "$target_app"
-  print "新版应用替换失败，已恢复旧版。"
-  exit 1
+  fail_update "新版应用替换失败，已恢复旧版。"
 fi
 
 lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 [[ -x "$lsregister" ]] && "$lsregister" -f "$target_app" >/dev/null 2>&1 || true
+/usr/bin/osascript -e 'display notification "更新完成，正在重新打开。" with title "Agent Pulse"' >/dev/null 2>&1 || true
 /usr/bin/open "$target_app"
 /bin/rm -rf "$work_dir"
 """#

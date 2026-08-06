@@ -665,6 +665,9 @@ if CommandLine.arguments.contains("--login-status-test") {
         exit(EXIT_FAILURE)
     }
     try! AppUpdateInstaller.validateHelperScriptForTesting()
+    precondition(AgentKind.codex.supportsModelProviderConfiguration)
+    precondition(!AgentKind.cursor.supportsModelProviderConfiguration)
+    precondition(!AgentKind.hermes.supportsModelProviderConfiguration)
     for vendor in ProviderVendor.presetChoices where vendor != .custom {
         precondition(vendor.defaultBaseURL?.hasPrefix("https://") == true)
         precondition(vendor.defaultModel?.isEmpty == false)
@@ -707,6 +710,14 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(custom.contains("test-provider.key"))
     precondition(custom.contains("[model_providers.codeapi_status_custom]"))
     precondition(!custom.contains("model_provider = \"legacy\""))
+
+    let preservedModelProvider = RouteConfigManager.render(
+        sample,
+        route: .provider(provider.id),
+        profile: provider,
+        modelProvider: "custom_runtime"
+    )
+    precondition(preservedModelProvider.hasPrefix("model_provider = \"custom_runtime\""))
 
     let sameNameProvider = ProviderProfile(
         id: "same-name-provider",
@@ -893,7 +904,7 @@ if CommandLine.arguments.contains("--login-status-test") {
         in: legacyNamedProviderConfig,
         profiles: [provider],
         selectedProviderID: provider.id
-    ))
+    ) == false)
     precondition(!RouteConfigManager.needsUpgradeReconciliation(
         in: custom,
         profiles: [provider],

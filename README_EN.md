@@ -53,8 +53,8 @@ Agent Pulse launches automatically after installation. The default location is `
 | Usage dashboard | Review official usage, supported provider balances, and Hermes local tokens, requests, and costs |
 | Task status | Read Codex logs, Cursor Hooks, and Hermes Gateway state: red for execution, yellow for tools, and green for completion |
 | Status appearance | Preview and switch among multiple menu bar indicators in a compact five-column gallery |
-| Session continuity | Never rewrite the Codex, Cursor, or Hermes session database |
-| Legacy sessions | Detect legacy provider sessions on first launch, then create OpenAI-compatible copies with explicit consent and full local backups |
+| Session continuity | Route switching never rewrites the Codex, Cursor, or Hermes session database |
+| model_provider | Read the current Codex value on first launch; edit or restore it from the model and route page |
 
 Third-party routes connect directly through each provider's native Responses API, without a local protocol bridge. The Alibaba Model Studio preset supports Responses API directly. Zhipu AI connection tests use its official Chat Completions endpoint to validate the key and model, but Zhipu cannot be used as a direct Codex route until it exposes a Responses-compatible endpoint. Cursor BYOK remains managed by Cursor’s official Models settings.
 
@@ -101,7 +101,7 @@ The app is generated at `build/Agent Pulse.app`, and the installer is generated 
 - Cursor official usage requires explicit consent; the login token is used in memory only and is never copied or persisted.
 - Cursor Hooks record only running, tool, and completion states—not prompts, responses, or conversation content.
 - Before changing Hermes models, Agent Pulse creates a local restore snapshot in `~/.hermes/` with `600` permissions and restores it when “current configuration” is selected.
-- Legacy-session copying runs only after user confirmation; original sessions stay unchanged and the database, config, and source JSONL files are backed up locally first.
+- Normal startup and route switching never migrate, copy, or rewrite legacy sessions. Editing `model_provider` only updates `config.toml` after saving a local configuration backup.
 - Agent Pulse does not use macOS Keychain and does not repeatedly trigger Keychain authorization prompts.
 
 ## Uninstall

@@ -13,6 +13,10 @@ enum AgentKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
         case .hermes: return "Hermes"
         }
     }
+
+    var supportsModelProviderConfiguration: Bool {
+        self == .codex
+    }
 }
 
 enum AgentPreference {

@@ -52,6 +52,76 @@ enum RouteConfigManager {
             .appendingPathComponent("config.toml")
     }
 
+    /// Returns the top-level Codex provider exactly as it is configured.
+    /// This is independent from Agent Pulse's selected route.
+    static func currentModelProvider() -> String {
+        guard let content = try? String(contentsOf: configURL, encoding: .utf8),
+              let value = topLevelValue(named: "model_provider", in: content),
+              !value.isEmpty else {
+            return "openai"
+        }
+        return value
+    }
+
+    /// Lists provider IDs declared in config.toml for display and validation.
+    static func configuredModelProviderIDs() -> [String] {
+        guard let content = try? String(contentsOf: configURL, encoding: .utf8) else {
+            return ["openai"]
+        }
+        var ids = ["openai"]
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("[model_providers."), trimmed.hasSuffix("]") else { continue }
+            let start = trimmed.index(trimmed.startIndex, offsetBy: "[model_providers.".count)
+            let end = trimmed.index(before: trimmed.endIndex)
+            let id = String(trimmed[start..<end])
+            guard !id.isEmpty, !id.hasSuffix(".auth"), !ids.contains(id) else { continue }
+            ids.append(id)
+        }
+        return ids
+    }
+
+    /// Updates only the top-level model_provider line. No session database or
+    /// JSONL file is read or written by this operation.
+    static func setModelProvider(_ provider: String) throws {
+        let value = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty,
+              value.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil else {
+            throw RouteConfigError.invalidRenderedConfig("model_provider 只能包含字母、数字、点、下划线和连字符。")
+        }
+
+        let directory = configURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let existing = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        let backup = directory.appendingPathComponent("config.toml.agent-pulse.bak")
+        if !existing.isEmpty {
+            try Data(existing.utf8).write(to: backup, options: .atomic)
+        }
+
+        var lines = existing.components(separatedBy: .newlines)
+        var replaced = false
+        var root = true
+        for index in lines.indices {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") { root = false }
+            guard root,
+                  let equals = trimmed.firstIndex(of: "="),
+                  String(trimmed[..<equals]).trimmingCharacters(in: .whitespaces) == "model_provider" else {
+                continue
+            }
+            lines[index] = "model_provider = \"\(tomlEscape(value))\""
+            replaced = true
+            break
+        }
+        if !replaced {
+            lines.insert("model_provider = \"\(tomlEscape(value))\"", at: 0)
+        }
+
+        let rendered = lines.joined(separator: "\n")
+        try validate(rendered)
+        try Data(rendered.utf8).write(to: configURL, options: .atomic)
+    }
+
     static func currentRoute() -> RouteChoice {
         guard let content = try? String(contentsOf: configURL, encoding: .utf8) else {
             return .official
@@ -82,11 +152,6 @@ enum RouteConfigManager {
         selectedProviderID: String?
     ) -> Bool {
         guard containsManagedBlock(content) else { return false }
-        let route = detectedRoute(
-            in: content,
-            profiles: profiles,
-            selectedProviderID: selectedProviderID
-        )
         let legacyCredential = content.contains("command = \"/usr/bin/security\"")
             || content.contains(CredentialStore.legacyDirectoryURL.path)
             || content.contains(legacyBeginMarker)
@@ -98,13 +163,9 @@ enum RouteConfigManager {
         let missingManagedProvider = requiredIDs.contains {
             !content.contains("[model_providers.\($0)]")
         }
-        let legacyProviderRoute: Bool
-        if case .provider = route {
-            legacyProviderRoute = topLevelProvider(in: content)?.lowercased() != "openai"
-        } else {
-            legacyProviderRoute = false
-        }
-        return legacyCredential || missingManagedProvider || legacyProviderRoute
+        // A non-openai model_provider may be intentional and is exposed in
+        // settings. Never rewrite it merely because the selected route changed.
+        return legacyCredential || missingManagedProvider
     }
 
     static func detectedRoute(
@@ -151,6 +212,7 @@ enum RouteConfigManager {
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             let existing = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+            let existingModelProvider = topLevelValue(named: "model_provider", in: existing) ?? "openai"
             let existingProvider = topLevelProvider(in: existing)?.lowercased()
             let existingRoute = detectedRoute(
                 in: existing,
@@ -189,7 +251,8 @@ enum RouteConfigManager {
                 legacyProfile: legacyProfile,
                 officialModel: ProviderStore.officialModel(),
                 officialModelCatalogJSON: ProviderStore.officialModelCatalogJSON(),
-                compatibilityModelCatalogJSON: compatibilityCatalogURL?.path
+                compatibilityModelCatalogJSON: compatibilityCatalogURL?.path,
+                modelProvider: existingModelProvider
             )
             try validate(rendered)
             try Data(rendered.utf8).write(to: configURL, options: .atomic)
@@ -232,7 +295,8 @@ enum RouteConfigManager {
         legacyProfile: ProviderProfile? = nil,
         officialModel: String? = nil,
         officialModelCatalogJSON: String? = nil,
-        compatibilityModelCatalogJSON: String? = nil
+        compatibilityModelCatalogJSON: String? = nil,
+        modelProvider: String? = nil
     ) -> String {
         let configuredProfiles = profiles.isEmpty ? profile.map { [$0] } ?? [] : profiles
         var providerEntries: [(id: String, profile: ProviderProfile)] = []
@@ -273,9 +337,10 @@ enum RouteConfigManager {
         }
 
         while lines.first?.isEmpty == true { lines.removeFirst() }
+        let renderedModelProvider = tomlEscape(modelProvider ?? "openai")
         switch route {
         case .official:
-            lines.insert("model_provider = \"openai\"", at: 0)
+            lines.insert("model_provider = \"\(renderedModelProvider)\"", at: 0)
             if let officialModel, !officialModel.isEmpty {
                 lines.insert("model = \"\(tomlEscape(officialModel))\"", at: 1)
             }
@@ -287,7 +352,7 @@ enum RouteConfigManager {
             }
         case .provider:
             guard let profile else { return content }
-            lines.insert("model_provider = \"openai\"", at: 0)
+            lines.insert("model_provider = \"\(renderedModelProvider)\"", at: 0)
             lines.insert("model = \"\(tomlEscape(profile.model))\"", at: 1)
             lines.insert("openai_base_url = \"\(tomlEscape(activeBaseURL(for: profile)))\"", at: 2)
             lines.insert("forced_login_method = \"api\"", at: 3)

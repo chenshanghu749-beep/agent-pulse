@@ -398,6 +398,9 @@ final class SettingsWindowController: NSWindowController {
     )
     private let routeDescription = NSTextField(wrappingLabelWithString: "")
     private let routeProviderPopup = NSPopUpButton()
+    private let modelProviderField = NSTextField()
+    private let saveModelProviderButton = TasteActionButton(title: "保存", target: nil, action: nil)
+    private let resetModelProviderButton = TasteActionButton(title: "恢复 openai", target: nil, action: nil)
     private let cursorBalanceProviderPopup = NSPopUpButton()
     private let cursorOfficialUsageSwitch = NSSwitch()
     private let providerPopup = NSPopUpButton()
@@ -430,6 +433,7 @@ final class SettingsWindowController: NSWindowController {
     private var availableUpdate: AppUpdateStatus?
     private weak var codexRouteCard: NSView?
     private weak var cursorRouteCard: NSView?
+    private weak var modelProviderCard: NSView?
 
     init(appDelegate: AppDelegate) {
         self.appDelegate = appDelegate
@@ -618,6 +622,17 @@ final class SettingsWindowController: NSWindowController {
         routeProviderPopup.target = self
         routeProviderPopup.action = #selector(routeProviderChanged)
         routeProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
+        modelProviderField.placeholderString = "openai"
+        modelProviderField.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        modelProviderField.toolTip = "Codex config.toml 的顶层 model_provider"
+        saveModelProviderButton.target = self
+        saveModelProviderButton.action = #selector(saveModelProvider)
+        saveModelProviderButton.role = .secondary
+        saveModelProviderButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        resetModelProviderButton.target = self
+        resetModelProviderButton.action = #selector(resetModelProvider)
+        resetModelProviderButton.role = .secondary
+        resetModelProviderButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
         cursorBalanceProviderPopup.target = self
         cursorBalanceProviderPopup.action = #selector(cursorBalanceProviderChanged)
         cursorBalanceProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
@@ -860,12 +875,27 @@ final class SettingsWindowController: NSWindowController {
             scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 390)
         ])
 
+        let modelProviderActions = NSStackView(
+            views: [modelProviderField, saveModelProviderButton, resetModelProviderButton]
+        )
+        modelProviderActions.orientation = .horizontal
+        modelProviderActions.alignment = .centerY
+        modelProviderActions.spacing = 8
+        let modelProviderRow = settingRow(
+            title: "model_provider",
+            detail: "读取并编辑 Codex config.toml 的全局提供商标识。只修改配置，不修改会话数据库。",
+            control: modelProviderActions
+        )
+        let modelProviderCard = card([modelProviderRow], interactive: true)
+        self.modelProviderCard = modelProviderCard
+
         return page(
             title: "模型与路由",
             subtitle: "选择 Agent，管理 Agent Pulse 当前能够连接的模型与路由。",
             headerAccessory: addProviderButton,
             cards: [
                 card([agentRow], interactive: true),
+                modelProviderCard,
                 scroll
             ]
         )
@@ -880,6 +910,7 @@ final class SettingsWindowController: NSWindowController {
         providerBalanceLabels.removeAll(keepingCapacity: true)
 
         let agent = selectedAgent()
+        modelProviderCard?.isHidden = !agent.supportsModelProviderConfiguration
         addProviderButton.isHidden = agent == .cursor
         let official = makeModelRow(provider: nil, agent: agent)
         modelListStack.addArrangedSubview(official)
@@ -1969,6 +2000,7 @@ final class SettingsWindowController: NSWindowController {
         }
         reloadProviderPopups()
         loadSelectedProvider()
+        modelProviderField.stringValue = RouteConfigManager.currentModelProvider()
         statusLabel.stringValue = ""
         confirmButton.isEnabled = true
         updateConfirmButtonTitle()
@@ -2054,7 +2086,7 @@ final class SettingsWindowController: NSWindowController {
         installUpdateButton.title = "更新到 \(status.latestVersion)"
         installUpdateButton.isHidden = false
         updateStatusLabel.textColor = .systemOrange
-        updateStatusLabel.stringValue = "发现新版本 \(status.latestVersion)。点击立即更新后，Agent Pulse 将退出、完成替换并自动重新打开。"
+        updateStatusLabel.stringValue = "发现新版本 \(status.latestVersion)。点击立即更新后，Agent Pulse 将退出，由更新助手在后台下载、安装并自动重新打开。"
         statusLabel.stringValue = "界面预览模式"
         selectSection(.version)
         NSApp.activate(ignoringOtherApps: true)
@@ -2101,6 +2133,33 @@ final class SettingsWindowController: NSWindowController {
     @objc private func routeChanged() {
         statusLabel.stringValue = ""
         updateRouteFields()
+    }
+
+    @objc private func saveModelProvider() {
+        let value = modelProviderField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            showError("model_provider 不能为空。")
+            modelProviderField.stringValue = RouteConfigManager.currentModelProvider()
+            return
+        }
+        do {
+            try RouteConfigManager.setModelProvider(value)
+            modelProviderField.stringValue = RouteConfigManager.currentModelProvider()
+            statusLabel.textColor = .secondaryLabelColor
+            if RouteConfigManager.configuredModelProviderIDs().contains(value) {
+                statusLabel.stringValue = "已保存 model_provider=\(value)。重启 Codex 后生效；会话数据库未修改。"
+            } else {
+                statusLabel.stringValue = "已保存，但 config.toml 未找到对应的 model_providers.\(value) 配置；请先补充该配置。"
+            }
+        } catch {
+            showError(error.localizedDescription)
+            modelProviderField.stringValue = RouteConfigManager.currentModelProvider()
+        }
+    }
+
+    @objc private func resetModelProvider() {
+        modelProviderField.stringValue = "openai"
+        saveModelProvider()
     }
 
     @objc private func agentChanged() {
@@ -2206,7 +2265,7 @@ final class SettingsWindowController: NSWindowController {
                 let status = try await AppUpdateChecker.check()
                 if status.updateAvailable {
                     updateStatusLabel.textColor = .systemOrange
-                    updateStatusLabel.stringValue = "发现新版本 \(status.latestVersion)。点击立即更新后，Agent Pulse 将退出、完成替换并自动重新打开。"
+                    updateStatusLabel.stringValue = "发现新版本 \(status.latestVersion)。点击立即更新后，Agent Pulse 将退出，由更新助手在后台下载、安装并自动重新打开。"
                     availableUpdate = status
                     installUpdateButton.title = "更新到 \(status.latestVersion)"
                     installUpdateButton.isHidden = false
@@ -2227,21 +2286,20 @@ final class SettingsWindowController: NSWindowController {
         guard let status = availableUpdate, status.updateAvailable else { return }
         let alert = NSAlert()
         alert.messageText = "更新到 Agent Pulse \(status.latestVersion)？"
-        alert.informativeText = "更新包校验完成后，应用会自动退出、替换当前版本并重新打开。旧版会移到废纸篓。"
-        alert.addButton(withTitle: "下载并更新")
+        alert.informativeText = "Agent Pulse 将立即退出，由独立更新助手在后台下载、校验并安装新版，完成后自动重新打开。旧版会移到废纸篓。"
+        alert.addButton(withTitle: "退出并更新")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         installUpdateButton.isEnabled = false
         checkUpdateButton.isEnabled = false
-        installUpdateButton.title = "正在下载…"
+        installUpdateButton.title = "正在退出…"
         updateStatusLabel.textColor = .secondaryLabelColor
-        updateStatusLabel.stringValue = "正在下载并校验 Agent Pulse \(status.latestVersion)，完成后将自动重新启动…"
+        updateStatusLabel.stringValue = "正在启动更新助手…"
         Task {
             do {
                 let prepared = try await AppUpdateInstaller.prepare(status)
-                installUpdateButton.title = "正在重启…"
-                updateStatusLabel.stringValue = "更新包已通过校验，正在退出并安装。"
+                updateStatusLabel.stringValue = "更新助手已启动，正在退出 Agent Pulse。"
                 try prepared.launch()
                 NSApp.terminate(nil)
             } catch {
