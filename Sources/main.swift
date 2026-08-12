@@ -645,6 +645,32 @@ if CommandLine.arguments.contains("--login-status-test") {
         app.run()
     }
 } else if CommandLine.arguments.contains("--self-test") {
+    let sanitizedFixture = SensitiveConfigSanitizer.sanitize("""
+    api_key = "secret-value"
+    env_key = "OPENAI_API_KEY"
+    http_headers = { Authorization = "Bearer hidden" }
+    """)
+    precondition(!sanitizedFixture.contains("secret-value"))
+    precondition(!sanitizedFixture.contains("Bearer hidden"))
+    precondition(sanitizedFixture.contains("OPENAI_API_KEY"))
+    let previousWarningThreshold = UsageAlertPreferences.warningThreshold
+    let previousCriticalThreshold = UsageAlertPreferences.criticalThreshold
+    UsageAlertPreferences.warningThreshold = 20
+    UsageAlertPreferences.criticalThreshold = 10
+    precondition(UsageAlertManager.level(for: 25) == nil)
+    precondition(UsageAlertManager.level(for: 15) == "warning")
+    precondition(UsageAlertManager.level(for: 5) == "critical")
+    let previousBalanceWarning = UsageAlertPreferences.balanceWarningThreshold
+    let previousBalanceCritical = UsageAlertPreferences.balanceCriticalThreshold
+    UsageAlertPreferences.balanceWarningThreshold = 10
+    UsageAlertPreferences.balanceCriticalThreshold = 3
+    precondition(UsageAlertManager.balanceLevel(for: 20) == nil)
+    precondition(UsageAlertManager.balanceLevel(for: 7) == "warning")
+    precondition(UsageAlertManager.balanceLevel(for: 2) == "critical")
+    UsageAlertPreferences.warningThreshold = previousWarningThreshold
+    UsageAlertPreferences.criticalThreshold = previousCriticalThreshold
+    UsageAlertPreferences.balanceWarningThreshold = previousBalanceWarning
+    UsageAlertPreferences.balanceCriticalThreshold = previousBalanceCritical
     let sample = """
     model = "gpt-5.6-sol"
     model_provider = "legacy"

@@ -24,6 +24,7 @@ swiftc \
   -module-cache-path "$MODULE_CACHE_DIR" \
   -framework AppKit \
   -framework CoreServices \
+  -framework UserNotifications \
   -framework WidgetKit \
   "$ROOT_DIR"/Sources/*.swift \
   -o "$MACOS_DIR/AgentPulse"

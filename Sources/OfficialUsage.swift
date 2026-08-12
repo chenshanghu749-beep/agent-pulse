@@ -225,7 +225,7 @@ enum OfficialUsageClient {
         }
 
         let messages = [
-            "{\"method\":\"initialize\",\"id\":0,\"params\":{\"clientInfo\":{\"name\":\"agent_pulse\",\"title\":\"Agent Pulse\",\"version\":\"3.0.1\"}}}",
+            "{\"method\":\"initialize\",\"id\":0,\"params\":{\"clientInfo\":{\"name\":\"agent_pulse\",\"title\":\"Agent Pulse\",\"version\":\"\(AppUpdateChecker.currentVersion)\"}}}",
             "{\"method\":\"initialized\",\"params\":{}}",
             "{\"method\":\"account/read\",\"id\":1,\"params\":{\"refreshToken\":true}}",
             "{\"method\":\"account/rateLimits/read\",\"id\":6}",

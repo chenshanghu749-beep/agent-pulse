@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 private final class SettingsSidebarView: NSView {
     override var wantsUpdateLayer: Bool { true }
@@ -34,7 +35,7 @@ private final class SettingsPageView: NSView {
     }
 }
 
-private final class TasteCardView: NSBox {
+private class TasteCardView: NSBox {
     var respondsToHover = false
     private var tracking: NSTrackingArea?
 
@@ -80,6 +81,322 @@ private final class TasteCardView: NSBox {
                     ? NSColor.white.withAlphaComponent(0.12)
                     : NSColor.black.withAlphaComponent(0.10)
             }
+    }
+}
+
+private final class ModelBannerView: TasteCardView {
+    var providerID: String?
+    var representsOfficial = false
+    weak var actionTarget: AnyObject?
+    var bannerAction: Selector?
+    private let flowLayer = CALayer()
+    private let flowGradientLayer = CAGradientLayer()
+    private let flowMask = CAShapeLayer()
+    private var selected = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureFlowLayer()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureFlowLayer()
+    }
+
+    private func configureFlowLayer() {
+        wantsLayer = true
+        flowLayer.masksToBounds = true
+        flowLayer.zPosition = 100
+        flowLayer.isHidden = true
+        flowGradientLayer.type = .conic
+        flowGradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        flowGradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
+        flowGradientLayer.locations = [0, 0.18, 0.42, 0.68, 1]
+        flowLayer.addSublayer(flowGradientLayer)
+        flowMask.fillColor = NSColor.clear.cgColor
+        flowMask.strokeColor = NSColor.black.cgColor
+        flowMask.lineWidth = 2.2
+        flowMask.lineCap = .round
+        flowLayer.mask = flowMask
+        attachFlowLayerIfNeeded()
+    }
+
+    func setSelectedFlow(_ selected: Bool) {
+        self.selected = selected
+        if selected {
+            borderWidth = 0.8
+            borderColor = NSColor(name: nil) { appearance in
+                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                    ? NSColor.white.withAlphaComponent(0.20)
+                    : NSColor.black.withAlphaComponent(0.22)
+            }
+        } else {
+            setSelectedAppearance(false)
+        }
+        flowLayer.isHidden = !selected
+        guard selected else {
+            flowGradientLayer.removeAnimation(forKey: "borderFlow")
+            return
+        }
+        refreshFlowColor()
+        needsLayout = true
+        if flowGradientLayer.animation(forKey: "borderFlow") == nil {
+            let animation = CABasicAnimation(keyPath: "transform.rotation.z")
+            animation.fromValue = 0
+            animation.toValue = Double.pi * 2
+            animation.duration = 2.2
+            animation.repeatCount = .infinity
+            animation.timingFunction = CAMediaTimingFunction(name: .linear)
+            flowGradientLayer.add(animation, forKey: "borderFlow")
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        attachFlowLayerIfNeeded()
+        flowLayer.frame = bounds
+        flowMask.frame = flowLayer.bounds
+        let gradientSide = hypot(flowLayer.bounds.width, flowLayer.bounds.height)
+        flowGradientLayer.frame = NSRect(
+            x: (flowLayer.bounds.width - gradientSide) / 2,
+            y: (flowLayer.bounds.height - gradientSide) / 2,
+            width: gradientSide,
+            height: gradientSide
+        )
+        flowMask.path = CGPath(
+            roundedRect: flowMask.bounds.insetBy(dx: 1.4, dy: 1.4),
+            cornerWidth: max(1, cornerRadius - 1.2),
+            cornerHeight: max(1, cornerRadius - 1.2),
+            transform: nil
+        )
+    }
+
+    private func attachFlowLayerIfNeeded() {
+        guard let layer, flowLayer.superlayer !== layer else { return }
+        flowLayer.removeFromSuperlayer()
+        layer.addSublayer(flowLayer)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshFlowColor()
+    }
+
+    private func refreshFlowColor() {
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let accent = dark ? NSColor.white : NSColor.black
+        flowGradientLayer.colors = [
+            accent.withAlphaComponent(0.08).cgColor,
+            accent.withAlphaComponent(0.96).cgColor,
+            accent.withAlphaComponent(0.10).cgColor,
+            accent.withAlphaComponent(0.62).cgColor,
+            accent.withAlphaComponent(0.08).cgColor
+        ]
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        guard bounds.contains(convert(event.locationInWindow, from: nil)),
+              let bannerAction else { return }
+        NSApp.sendAction(bannerAction, to: actionTarget, from: self)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        var current: NSView? = hit
+        while let view = current, view !== self {
+            if view is NSButton { return hit }
+            current = view.superview
+        }
+        return self
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+}
+
+private final class TastePopUpButton: NSPopUpButton {
+    override init(frame buttonFrame: NSRect, pullsDown flag: Bool) {
+        super.init(frame: buttonFrame, pullsDown: flag)
+        configureAppearance()
+    }
+
+    convenience init() { self.init(frame: .zero, pullsDown: false) }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureAppearance()
+    }
+
+    private func configureAppearance() {
+        isBordered = false
+        focusRingType = .none
+        wantsLayer = true
+        font = .systemFont(ofSize: 12.5, weight: .medium)
+        contentTintColor = .labelColor
+        heightAnchor.constraint(equalToConstant: 36).isActive = true
+    }
+
+    override func updateLayer() {
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        layer?.cornerRadius = 9
+        layer?.borderWidth = 0.8
+        layer?.borderColor = (dark
+            ? NSColor.white.withAlphaComponent(0.18)
+            : NSColor.black.withAlphaComponent(0.16)).cgColor
+        layer?.backgroundColor = (dark
+            ? NSColor.white.withAlphaComponent(0.065)
+            : NSColor.black.withAlphaComponent(0.035)).cgColor
+        contentTintColor = .labelColor
+    }
+}
+
+private final class TasteValueStepper: NSControl {
+    private let decrementButton = NSButton()
+    private let incrementButton = NSButton()
+    private let valueLabel = NSTextField(labelWithString: "—")
+    private var values: [String] = []
+    private var selectedIndex = 0
+    private var unavailableTitle: String?
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override var isEnabled: Bool {
+        didSet {
+            updateControlState()
+            needsDisplay = true
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureAppearance()
+    }
+
+    convenience init() { self.init(frame: .zero) }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureAppearance()
+    }
+
+    var selectedTitle: String? {
+        guard values.indices.contains(selectedIndex) else { return nil }
+        return values[selectedIndex]
+    }
+
+    func setOptions(_ values: [String], selected: String?) {
+        self.values = values
+        unavailableTitle = nil
+        if let selected, let index = values.firstIndex(of: selected) {
+            selectedIndex = index
+        } else {
+            selectedIndex = min(3, max(0, values.count - 1))
+        }
+        isEnabled = !values.isEmpty
+        updateControlState()
+    }
+
+    func setUnavailable(_ title: String) {
+        values = []
+        selectedIndex = 0
+        unavailableTitle = title
+        isEnabled = false
+        updateControlState()
+    }
+
+    private func configureAppearance() {
+        wantsLayer = true
+        focusRingType = .none
+
+        valueLabel.alignment = .center
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: 14.5, weight: .semibold)
+        valueLabel.textColor = .labelColor
+        valueLabel.lineBreakMode = .byTruncatingTail
+        valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        configureButton(decrementButton, symbol: "minus", action: #selector(decrementValue))
+        configureButton(incrementButton, symbol: "plus", action: #selector(incrementValue))
+
+        let leftSeparator = NSBox()
+        leftSeparator.boxType = .separator
+        let rightSeparator = NSBox()
+        rightSeparator.boxType = .separator
+
+        let stack = NSStackView(views: [decrementButton, leftSeparator, valueLabel, rightSeparator, incrementButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 42),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 178),
+            decrementButton.widthAnchor.constraint(equalToConstant: 40),
+            incrementButton.widthAnchor.constraint(equalToConstant: 40),
+            leftSeparator.widthAnchor.constraint(equalToConstant: 1),
+            rightSeparator.widthAnchor.constraint(equalToConstant: 1),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+        updateControlState()
+    }
+
+    private func configureButton(_ button: NSButton, symbol: String, action: Selector) {
+        button.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: symbol == "minus" ? "减小阈值" : "增大阈值"
+        )?.withSymbolConfiguration(.init(pointSize: 12.5, weight: .semibold))
+        button.imagePosition = .imageOnly
+        button.isBordered = false
+        button.focusRingType = .none
+        button.target = self
+        button.action = action
+    }
+
+    @objc private func decrementValue() { moveSelection(by: -1) }
+
+    @objc private func incrementValue() { moveSelection(by: 1) }
+
+    private func moveSelection(by delta: Int) {
+        let nextIndex = selectedIndex + delta
+        guard values.indices.contains(nextIndex) else { return }
+        selectedIndex = nextIndex
+        updateControlState()
+        sendAction(action, to: target)
+    }
+
+    private func updateControlState() {
+        valueLabel.stringValue = selectedTitle ?? unavailableTitle ?? "—"
+        decrementButton.isEnabled = isEnabled && selectedIndex > 0
+        incrementButton.isEnabled = isEnabled && selectedIndex < values.count - 1
+        decrementButton.contentTintColor = decrementButton.isEnabled ? .labelColor : .tertiaryLabelColor
+        incrementButton.contentTintColor = incrementButton.isEnabled ? .labelColor : .tertiaryLabelColor
+        valueLabel.textColor = isEnabled ? .labelColor : .secondaryLabelColor
+        alphaValue = isEnabled ? 1 : 0.72
+    }
+
+    override func updateLayer() {
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        layer?.cornerRadius = 11
+        layer?.borderWidth = 0.8
+        layer?.borderColor = (dark
+            ? NSColor.white.withAlphaComponent(0.20)
+            : NSColor.black.withAlphaComponent(0.18)).cgColor
+        layer?.backgroundColor = (dark
+            ? NSColor.white.withAlphaComponent(0.075)
+            : NSColor.black.withAlphaComponent(0.035)).cgColor
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 }
 
@@ -262,22 +579,26 @@ private final class StatusStyleButton: NSButton {
 
     override func updateLayer() {
         let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        layer?.cornerRadius = 12
-        layer?.borderWidth = choiceSelected ? 1.6 : 0.7
+        layer?.cornerRadius = 14
+        layer?.borderWidth = choiceSelected ? 1.5 : 0.7
         layer?.borderColor = choiceSelected
-            ? NSColor.labelColor.cgColor
+            ? (dark
+                ? NSColor.white.withAlphaComponent(0.76)
+                : NSColor.black.withAlphaComponent(0.66)).cgColor
             : (dark
                 ? NSColor.white.withAlphaComponent(0.12)
                 : NSColor.black.withAlphaComponent(0.10)).cgColor
         layer?.backgroundColor = choiceSelected
-            ? NSColor.labelColor.withAlphaComponent(dark ? 0.16 : 0.07).cgColor
+            ? (dark
+                ? NSColor.white.withAlphaComponent(0.13)
+                : NSColor.black.withAlphaComponent(0.055)).cgColor
             : (dark
                 ? NSColor(calibratedWhite: hovered ? 0.22 : 0.18, alpha: 1)
                 : NSColor(calibratedWhite: hovered ? 0.965 : 0.985, alpha: 1)).cgColor
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOffset = CGSize(width: 0, height: -2)
-        layer?.shadowRadius = hovered ? 8 : 4
-        layer?.shadowOpacity = hovered ? 0.10 : 0.03
+        layer?.shadowRadius = hovered || choiceSelected ? 8 : 4
+        layer?.shadowOpacity = hovered ? 0.10 : (choiceSelected ? 0.07 : 0.025)
         contentTintColor = .labelColor
     }
 
@@ -333,16 +654,24 @@ enum AppThemePreference {
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
-    private enum Section: Int {
-        case dashboard, route, providerEditor, appearance, version
+    private struct AlertThresholdContext {
+        let modelKey: String
+        let title: String
+        let metric: UsageAlertMetricKind?
+    }
 
-        static let navigation: [Section] = [.dashboard, .route, .appearance, .version]
+    private enum Section: Int {
+        case dashboard, route, providerEditor, monitoring, security, appearance, version
+
+        static let navigation: [Section] = [.dashboard, .route, .monitoring, .security, .appearance, .version]
 
         var title: String {
             switch self {
             case .dashboard: return "仪表盘"
             case .route: return "模型与路由"
             case .providerEditor: return "提供商配置"
+            case .monitoring: return "监控与历史"
+            case .security: return "配置与安全"
             case .appearance: return "状态与外观"
             case .version: return "版本"
             }
@@ -353,6 +682,8 @@ final class SettingsWindowController: NSWindowController {
             case .dashboard: return "chart.bar.xaxis"
             case .route: return "arrow.triangle.branch"
             case .providerEditor: return "server.rack"
+            case .monitoring: return "waveform.path.ecg"
+            case .security: return "lock.shield"
             case .appearance: return "circle.lefthalf.filled"
             case .version: return "arrow.triangle.2.circlepath"
             }
@@ -367,6 +698,8 @@ final class SettingsWindowController: NSWindowController {
     private var selectedSection = Section.dashboard
     private var providerRows: [String: TasteCardView] = [:]
     private var providerBalanceLabels: [String: NSTextField] = [:]
+    private var modelTestLabels: [String: NSTextField] = [:]
+    private var modelTestMessages: [String: (text: String, color: NSColor, detail: String?)] = [:]
     private var providerBalances: [String: String] = [:]
     private var providerBalanceUpdatedAt: [String: Date] = [:]
     private var providerBalanceRefreshesInFlight: Set<String> = []
@@ -386,6 +719,23 @@ final class SettingsWindowController: NSWindowController {
     private let dashboardVersionLabel = NSTextField(labelWithString: AppUpdateChecker.currentVersion)
     private let dashboardMessageLabel = NSTextField(wrappingLabelWithString: "运行状态正常")
     private let dashboardRefreshButton = TasteActionButton(title: "立即刷新", target: nil, action: nil)
+    private let usageAlertSwitch = NSSwitch()
+    private let alertThresholdControl = TasteValueStepper()
+    private let alertContextLabel = NSTextField(wrappingLabelWithString: "尚未读取当前模型")
+    private let historySummaryLabel = NSTextField(wrappingLabelWithString: "尚无本地历史")
+    private let resetCountdownLabel = NSTextField(labelWithString: "当前数据暂无重置时间")
+    private let historyChart = UsageHistoryChartView()
+    private let exportHistoryButton = TasteActionButton(title: "导出 CSV", target: nil, action: nil)
+    private let healthStack = NSStackView()
+    private let checkRoutesButton = TasteActionButton(title: "检测全部", target: nil, action: nil)
+    private let backupPopup = TastePopUpButton()
+    private let backupSummaryLabel = NSTextField(wrappingLabelWithString: "尚无配置备份")
+    private let backupDiffText = NSTextView()
+    private let createBackupButton = TasteActionButton(title: "创建备份", target: nil, action: nil)
+    private let restoreBackupButton = TasteActionButton(title: "恢复", target: nil, action: nil)
+    private let exportConfigButton = TasteActionButton(title: "脱敏导出", target: nil, action: nil)
+    private let importConfigButton = TasteActionButton(title: "导入", target: nil, action: nil)
+    private var backupRecords: [ConfigBackupRecord] = []
 
     private let agentControl = NSSegmentedControl(
         labels: AgentKind.allCases.map(\.displayName),
@@ -594,6 +944,8 @@ final class SettingsWindowController: NSWindowController {
         pages[.dashboard] = buildDashboardPage()
         pages[.route] = buildRoutePage()
         pages[.providerEditor] = buildProvidersPage()
+        pages[.monitoring] = buildMonitoringPage()
+        pages[.security] = buildSecurityPage()
         pages[.appearance] = buildAppearancePage()
         pages[.version] = buildVersionPage()
         pages.values.forEach { enableTextInteraction(in: $0) }
@@ -615,8 +967,11 @@ final class SettingsWindowController: NSWindowController {
     private func configureControls() {
         agentControl.target = self
         agentControl.action = #selector(agentChanged)
+        agentControl.controlSize = .large
+        agentControl.font = .systemFont(ofSize: 14.5, weight: .semibold)
+        agentControl.heightAnchor.constraint(equalToConstant: 52).isActive = true
         for index in AgentKind.allCases.indices {
-            agentControl.setWidth(112, forSegment: index)
+            agentControl.setWidth(150, forSegment: index)
         }
         routeControl.target = self
         routeControl.action = #selector(routeChanged)
@@ -641,6 +996,36 @@ final class SettingsWindowController: NSWindowController {
         cursorBalanceProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
         cursorOfficialUsageSwitch.target = self
         cursorOfficialUsageSwitch.action = #selector(cursorOfficialUsageChanged)
+        usageAlertSwitch.target = self
+        usageAlertSwitch.action = #selector(usageAlertsChanged)
+        alertThresholdControl.target = self
+        alertThresholdControl.action = #selector(alertThresholdChanged)
+        exportHistoryButton.target = self
+        exportHistoryButton.action = #selector(exportUsageHistory)
+        exportHistoryButton.role = .secondary
+        checkRoutesButton.target = self
+        checkRoutesButton.action = #selector(checkAllRoutes)
+        checkRoutesButton.role = .primary
+        backupPopup.target = self
+        backupPopup.action = #selector(backupSelectionChanged)
+        createBackupButton.target = self
+        createBackupButton.action = #selector(createConfigBackup)
+        restoreBackupButton.target = self
+        restoreBackupButton.action = #selector(restoreConfigBackup)
+        exportConfigButton.target = self
+        exportConfigButton.action = #selector(exportSanitizedConfig)
+        importConfigButton.target = self
+        importConfigButton.action = #selector(importSanitizedConfig)
+        [createBackupButton, restoreBackupButton, exportConfigButton, importConfigButton, exportHistoryButton, checkRoutesButton].forEach {
+            $0.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        }
+        configureActionButton(createBackupButton, symbol: "plus", role: .primary)
+        configureActionButton(restoreBackupButton, symbol: "arrow.counterclockwise", role: .secondary)
+        configureActionButton(exportConfigButton, symbol: "square.and.arrow.up", role: .secondary)
+        configureActionButton(importConfigButton, symbol: "square.and.arrow.down", role: .secondary)
+        configureActionButton(exportHistoryButton, symbol: "tablecells", role: .secondary)
+        configureActionButton(checkRoutesButton, symbol: "bolt.horizontal.circle", role: .primary)
+        backupPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdates)
         installUpdateButton.target = self
@@ -885,8 +1270,8 @@ final class SettingsWindowController: NSWindowController {
         modelProviderActions.alignment = .centerY
         modelProviderActions.spacing = 8
         let modelProviderRow = settingRow(
-            title: "model_provider",
-            detail: "读取并编辑 Codex config.toml 的全局提供商标识。只修改配置，不修改会话数据库。",
+            title: "Model Provider",
+            detail: "读取并编辑 Codex config.toml 中的 model_provider 字段。只修改配置，不修改会话数据库。",
             control: modelProviderActions
         )
         let modelProviderCard = card([modelProviderRow], interactive: true)
@@ -911,6 +1296,7 @@ final class SettingsWindowController: NSWindowController {
         }
         providerRows.removeAll(keepingCapacity: true)
         providerBalanceLabels.removeAll(keepingCapacity: true)
+        modelTestLabels.removeAll(keepingCapacity: true)
         officialBalanceLabel = nil
 
         let agent = selectedAgent()
@@ -1003,7 +1389,7 @@ final class SettingsWindowController: NSWindowController {
 
     private func makeModelRow(provider: ProviderProfile?, agent: AgentKind) -> TasteCardView {
         let key = provider?.id ?? "official"
-        let row = TasteCardView()
+        let row = ModelBannerView()
         row.boxType = .custom
         row.respondsToHover = true
         row.wantsLayer = true
@@ -1013,7 +1399,11 @@ final class SettingsWindowController: NSWindowController {
                 ? NSColor(calibratedWhite: 0.145, alpha: 1)
                 : .white
         }
-        row.setSelectedAppearance(isModelSelected(key, agent: agent))
+        row.providerID = provider?.id
+        row.representsOfficial = provider == nil
+        row.actionTarget = self
+        row.bannerAction = #selector(modelBannerSelected(_:))
+        row.setSelectedFlow(isModelSelected(key, agent: agent))
         row.heightAnchor.constraint(equalToConstant: 80).isActive = true
         providerRows[key] = row
 
@@ -1047,19 +1437,27 @@ final class SettingsWindowController: NSWindowController {
             officialBalanceLabel = balance
         }
 
+        let testPresentation = modelTestPresentation(key: key, provider: provider)
+        let testStatus = NSTextField(labelWithString: testPresentation.text)
+        testStatus.font = .systemFont(ofSize: 10.5, weight: .medium)
+        testStatus.textColor = testPresentation.color
+        testStatus.alignment = .right
+        testStatus.toolTip = testPresentation.detail
+        testStatus.lineBreakMode = .byTruncatingTail
+        testStatus.widthAnchor.constraint(greaterThanOrEqualToConstant: 88).isActive = true
+        modelTestLabels[key] = testStatus
+        let metrics = NSStackView(views: [balance, testStatus])
+        metrics.orientation = .vertical
+        metrics.alignment = .trailing
+        metrics.spacing = 5
+
         let testButton = modelActionButton(
             symbol: "bolt.horizontal.circle",
             toolTip: "测试连接",
             action: #selector(testModelRow(_:)),
             provider: provider
         )
-        let selectButton = modelActionButton(
-            symbol: isModelSelected(key, agent: agent) ? "checkmark.circle.fill" : "checkmark.circle",
-            toolTip: "选择模型",
-            action: #selector(selectModelRow(_:)),
-            provider: provider
-        )
-        var actionViews: [NSView] = [balance, testButton]
+        var actionViews: [NSView] = [metrics, testButton]
         if let provider {
             let editButton = modelActionButton(
                 symbol: "pencil",
@@ -1076,7 +1474,6 @@ final class SettingsWindowController: NSWindowController {
             )
             actionViews.append(deleteButton)
         }
-        actionViews.append(selectButton)
         let actions = NSStackView(views: actionViews)
         actions.orientation = .horizontal
         actions.alignment = .centerY
@@ -1089,12 +1486,47 @@ final class SettingsWindowController: NSWindowController {
         content.translatesAutoresizingMaskIntoConstraints = false
         row.contentView?.addSubview(content)
         NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: row.contentView!.leadingAnchor, constant: 18),
-            content.trailingAnchor.constraint(equalTo: row.contentView!.trailingAnchor, constant: -14),
-            content.topAnchor.constraint(equalTo: row.contentView!.topAnchor, constant: 12),
-            content.bottomAnchor.constraint(equalTo: row.contentView!.bottomAnchor, constant: -12)
+            content.leadingAnchor.constraint(equalTo: row.contentView!.leadingAnchor, constant: 20),
+            content.trailingAnchor.constraint(equalTo: row.contentView!.trailingAnchor, constant: -16),
+            content.topAnchor.constraint(equalTo: row.contentView!.topAnchor, constant: 14),
+            content.bottomAnchor.constraint(equalTo: row.contentView!.bottomAnchor, constant: -14)
         ])
         return row
+    }
+
+    private func modelTestPresentation(
+        key: String,
+        provider: ProviderProfile?
+    ) -> (text: String, color: NSColor, detail: String?) {
+        if let value = modelTestMessages[key] { return value }
+        guard let provider, let snapshot = RouteHealthStore.snapshot(for: provider.id) else {
+            return ("未检测", .secondaryLabelColor, nil)
+        }
+        switch snapshot.state {
+        case .healthy:
+            let latency = snapshot.latencyMilliseconds.map { " · \($0) ms" } ?? ""
+            return ("连接正常\(latency)", .systemGreen, snapshot.message)
+        case .degraded:
+            return ("服务可达", .systemOrange, snapshot.message)
+        case .offline:
+            return ("连接异常", .systemRed, snapshot.message)
+        case .checking:
+            return ("检测中…", .systemOrange, snapshot.message)
+        case .unknown:
+            return ("未检测", .secondaryLabelColor, snapshot.message)
+        }
+    }
+
+    private func setModelTestPresentation(
+        key: String,
+        text: String,
+        color: NSColor,
+        detail: String? = nil
+    ) {
+        modelTestMessages[key] = (text, color, detail)
+        modelTestLabels[key]?.stringValue = text
+        modelTestLabels[key]?.textColor = color
+        modelTestLabels[key]?.toolTip = detail
     }
 
     private func modelActionButton(
@@ -1326,7 +1758,7 @@ final class SettingsWindowController: NSWindowController {
         refreshProviderBalances(providers.filter { $0.supports(agent) }, agent: agent)
     }
 
-    @objc private func selectModelRow(_ sender: ProviderActionButton) {
+    @objc private func modelBannerSelected(_ sender: ModelBannerView) {
         let agent = selectedAgent()
         if agent == .cursor {
             selectedProviderID = nil
@@ -1356,8 +1788,8 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func testModelRow(_ sender: ProviderActionButton) {
         sender.isEnabled = false
-        statusLabel.textColor = .secondaryLabelColor
-        statusLabel.stringValue = "正在测试连接…"
+        let key = sender.providerID ?? "official"
+        setModelTestPresentation(key: key, text: "检测中…", color: .systemOrange)
         let agent = selectedAgent()
         Task {
             defer { sender.isEnabled = true }
@@ -1375,7 +1807,12 @@ final class SettingsWindowController: NSWindowController {
                             throw HermesIntegrationError.invalidConfiguration
                         }
                     }
-                    showSuccess("\(officialProviderName(for: agent))连接正常。")
+                    setModelTestPresentation(
+                        key: key,
+                        text: "连接正常",
+                        color: .systemGreen,
+                        detail: "\(officialProviderName(for: agent))连接正常。"
+                    )
                     return
                 }
                 guard let id = sender.providerID,
@@ -1383,10 +1820,46 @@ final class SettingsWindowController: NSWindowController {
                       let key = CredentialStore.load(providerID: id), !key.isEmpty else {
                     throw SettingsError.missingCredential
                 }
-                let result = try await ProviderConnectionTester.test(profile: provider, key: key)
-                showSuccess(result)
+                let snapshot = await RouteHealthChecker.check(profile: provider, key: key)
+                RouteHealthStore.save(snapshot)
+                switch snapshot.state {
+                case .healthy:
+                    let latency = snapshot.latencyMilliseconds.map { " · \($0) ms" } ?? ""
+                    setModelTestPresentation(
+                        key: provider.id,
+                        text: "连接正常\(latency)",
+                        color: .systemGreen,
+                        detail: snapshot.message
+                    )
+                case .degraded:
+                    setModelTestPresentation(
+                        key: provider.id,
+                        text: "服务可达",
+                        color: .systemOrange,
+                        detail: snapshot.message
+                    )
+                case .offline:
+                    setModelTestPresentation(
+                        key: provider.id,
+                        text: "连接异常",
+                        color: .systemRed,
+                        detail: snapshot.message
+                    )
+                case .checking, .unknown:
+                    setModelTestPresentation(
+                        key: provider.id,
+                        text: snapshot.state.title,
+                        color: .secondaryLabelColor,
+                        detail: snapshot.message
+                    )
+                }
             } catch {
-                showError(error.localizedDescription)
+                setModelTestPresentation(
+                    key: key,
+                    text: "连接异常",
+                    color: .systemRed,
+                    detail: error.localizedDescription
+                )
             }
         }
     }
@@ -1639,6 +2112,141 @@ final class SettingsWindowController: NSWindowController {
         return stack
     }
 
+    private func buildMonitoringPage() -> NSView {
+        historySummaryLabel.font = .systemFont(ofSize: 12)
+        historySummaryLabel.textColor = .secondaryLabelColor
+        historySummaryLabel.maximumNumberOfLines = 2
+        historyChart.heightAnchor.constraint(equalToConstant: 92).isActive = true
+        historyChart.wantsLayer = true
+        historyChart.layer?.cornerRadius = 10
+        historyChart.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.035).cgColor
+
+        alertContextLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
+        alertContextLabel.textColor = .secondaryLabelColor
+        alertContextLabel.maximumNumberOfLines = 3
+        let alertsCard = card([
+            settingRow(
+                title: "用量预警",
+                detail: "在剩余用量跨过阈值时发送一次本地通知，不上传账户信息。",
+                control: usageAlertSwitch
+            ),
+            separator(),
+            settingRow(
+                title: "当前 Agent 与模型",
+                detail: "阈值按模型分别保存，切换模型后自动读取对应设置。",
+                control: alertContextLabel
+            ),
+            separator(),
+            settingRow(
+                title: "提醒阈值",
+                detail: "官方配额使用剩余百分比；支持余额接口的提供商使用可用余额。",
+                control: alertThresholdControl
+            ),
+            separator(),
+            settingRow(
+                title: "重置倒计时",
+                detail: "跟随当前 Agent 与路由，用量刷新后自动更新。",
+                control: resetCountdownLabel
+            )
+        ], interactive: true)
+
+        healthStack.orientation = .vertical
+        healthStack.alignment = .leading
+        healthStack.spacing = 0
+        let healthCard = card([
+            settingRow(
+                title: "路由健康",
+                detail: "主动发送最小请求，检查地址、鉴权、模型与响应延迟。不会自动切换路由。",
+                control: checkRoutesButton
+            ),
+            separator(),
+            padded(healthStack, horizontal: 22, vertical: 8)
+        ], interactive: true)
+
+        let historyHeader = NSStackView(views: [historySummaryLabel, NSView(), exportHistoryButton])
+        historyHeader.orientation = .horizontal
+        historyHeader.alignment = .centerY
+        historyHeader.spacing = 12
+        let historyContent = NSStackView(views: [historyHeader, historyChart])
+        historyContent.orientation = .vertical
+        historyContent.alignment = .leading
+        historyContent.spacing = 14
+        historyHeader.widthAnchor.constraint(equalTo: historyContent.widthAnchor).isActive = true
+        historyChart.widthAnchor.constraint(equalTo: historyContent.widthAnchor).isActive = true
+        let historyCard = card([padded(historyContent, horizontal: 22, vertical: 18)], interactive: true)
+
+        return page(
+            title: "监控与历史",
+            subtitle: "关注额度、重置时间与路由可用性，并把趋势保存在本机。",
+            cards: [alertsCard, healthCard, historyCard]
+        )
+    }
+
+    private func buildSecurityPage() -> NSView {
+        backupSummaryLabel.font = .systemFont(ofSize: 12)
+        backupSummaryLabel.textColor = .secondaryLabelColor
+        backupSummaryLabel.maximumNumberOfLines = 2
+        backupPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 250).isActive = true
+
+        let selectionControls = NSStackView(views: [backupPopup, restoreBackupButton])
+        selectionControls.orientation = .horizontal
+        selectionControls.alignment = .centerY
+        selectionControls.spacing = 8
+        let backupActions = NSStackView(views: [createBackupButton, exportConfigButton, importConfigButton])
+        backupActions.orientation = .horizontal
+        backupActions.alignment = .centerY
+        backupActions.spacing = 8
+
+        backupDiffText.isEditable = false
+        backupDiffText.isSelectable = true
+        backupDiffText.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        backupDiffText.textColor = .labelColor
+        backupDiffText.backgroundColor = .clear
+        backupDiffText.textContainerInset = NSSize(width: 12, height: 10)
+        backupDiffText.isVerticallyResizable = true
+        backupDiffText.isHorizontallyResizable = false
+        backupDiffText.autoresizingMask = [.width]
+        backupDiffText.textContainer?.widthTracksTextView = true
+        backupDiffText.textContainer?.containerSize = NSSize(
+            width: 10_000,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        backupDiffText.frame = NSRect(x: 0, y: 0, width: 560, height: 190)
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.documentView = backupDiffText
+        scroll.heightAnchor.constraint(equalToConstant: 190).isActive = true
+
+        return page(
+            title: "配置与安全",
+            subtitle: "备份路由配置、预览差异，并以不包含 API Key 的格式导入导出。",
+            cards: [
+                card([
+                    settingRow(
+                        title: "本地快照",
+                        detail: "最多保留 20 份。恢复前会再次自动备份当前配置。",
+                        control: backupActions
+                    ),
+                    separator(),
+                    settingRow(
+                        title: "选择备份",
+                        detail: "只处理 config.toml 与提供商元数据，不读取或修改会话数据库。",
+                        control: selectionControls
+                    ),
+                    separator(),
+                    padded(backupSummaryLabel, horizontal: 22, vertical: 13)
+                ], interactive: true),
+                card([
+                    padded(sectionHeading(title: "配置差异", detail: "敏感字段在预览与导出中始终脱敏。"), horizontal: 22, vertical: 15),
+                    separator(),
+                    padded(scroll, horizontal: 12, vertical: 8)
+                ], interactive: true)
+            ]
+        )
+    }
+
     private func buildAppearancePage() -> NSView {
         let themeRow = settingRow(
             title: "界面主题",
@@ -1648,32 +2256,29 @@ final class SettingsWindowController: NSWindowController {
 
         statusStyleButtons.removeAll(keepingCapacity: true)
         let buttons = StatusIconStyle.allCases.map(makeStatusStyleButton)
-        var rows: [[NSView]] = []
-        for index in stride(from: 0, to: buttons.count, by: 5) {
-            rows.append((0..<5).map { offset in
-                index + offset < buttons.count ? buttons[index + offset] : NSView()
-            })
+        let splitIndex = min(4, buttons.count)
+        let topRow = NSStackView(views: Array(buttons.prefix(splitIndex)))
+        let bottomRow = NSStackView(views: Array(buttons.dropFirst(splitIndex)))
+        [topRow, bottomRow].forEach {
+            $0.orientation = .horizontal
+            $0.alignment = .centerY
+            $0.distribution = .fillEqually
+            $0.spacing = 9
         }
-        let grid = NSGridView(views: rows)
-        grid.rowSpacing = 8
-        grid.columnSpacing = 8
-        for columnIndex in 0..<5 {
-            grid.column(at: columnIndex).xPlacement = .fill
-        }
-        if let first = buttons.first {
-            for button in buttons.dropFirst() {
-                button.widthAnchor.constraint(equalTo: first.widthAnchor).isActive = true
-            }
-        }
-        for rowIndex in rows.indices {
-            grid.row(at: rowIndex).yPlacement = .fill
+        let gallery = NSStackView(views: bottomRow.arrangedSubviews.isEmpty ? [topRow] : [topRow, bottomRow])
+        gallery.orientation = .vertical
+        gallery.alignment = .leading
+        gallery.spacing = 9
+        topRow.widthAnchor.constraint(equalTo: gallery.widthAnchor).isActive = true
+        if !bottomRow.arrangedSubviews.isEmpty {
+            bottomRow.widthAnchor.constraint(equalTo: gallery.widthAnchor).isActive = true
         }
 
         let styleHeading = appearanceSectionHeading(
             title: "菜单栏状态样式",
             detail: "预览并选择一种状态图标；黑白高对比边框表示当前样式。"
         )
-        let styleGallery = padded(grid, horizontal: 16, vertical: 14)
+        let styleGallery = padded(gallery, horizontal: 16, vertical: 14)
         let legend = NSStackView(views: [
             signalLegend(color: .systemRed, title: "执行中", detail: "正在请求模型"),
             verticalSeparator(),
@@ -1700,19 +2305,40 @@ final class SettingsWindowController: NSWindowController {
     private func makeStatusStyleButton(_ style: StatusIconStyle) -> StatusStyleButton {
         let button = StatusStyleButton(title: style.displayName, target: self, action: #selector(iconStyleChanged(_:)))
         button.style = style
-        button.image = StatusIconRenderer.image(style: style, active: .green)
-        button.imagePosition = .imageLeading
+        button.image = statusStyleImageWithTextSpacing(
+            StatusIconRenderer.image(style: style, active: .green),
+            spacing: 6
+        )
+        button.imagePosition = .imageAbove
+        button.imageScaling = .scaleProportionallyDown
         button.imageHugsTitle = true
         button.alignment = .center
         button.isBordered = false
         button.wantsLayer = true
-        button.font = displayFont(size: 11.5, weight: .semibold)
+        button.font = displayFont(size: 12, weight: .semibold)
         button.toolTip = "切换为\(style.displayName)"
-        button.heightAnchor.constraint(equalToConstant: 58).isActive = true
-        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 104).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 78).isActive = true
         button.setChoiceSelected(style == StatusIconPreference.selected)
         statusStyleButtons[style] = button
         return button
+    }
+
+    private func statusStyleImageWithTextSpacing(_ source: NSImage, spacing: CGFloat) -> NSImage {
+        let size = NSSize(width: source.size.width, height: source.size.height + spacing)
+        return NSImage(size: size, flipped: false) { _ in
+            source.draw(
+                in: NSRect(
+                    x: 0,
+                    y: spacing,
+                    width: source.size.width,
+                    height: source.size.height
+                ),
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1
+            )
+            return true
+        }
     }
 
     private func appearanceSectionHeading(title: String, detail: String) -> NSView {
@@ -1956,6 +2582,21 @@ final class SettingsWindowController: NSWindowController {
         confirmButton.needsDisplay = true
     }
 
+    private func configureActionButton(
+        _ button: TasteActionButton,
+        symbol: String,
+        role: TasteActionButton.Role
+    ) {
+        button.role = role
+        button.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: button.title
+        )?.withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
+        button.imagePosition = .imageLeading
+        button.imageHugsTitle = true
+        button.imageScaling = .scaleProportionallyDown
+    }
+
     private func styleSegmentedControls() {
         let selectedColor = NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white : .black
@@ -2025,6 +2666,8 @@ final class SettingsWindowController: NSWindowController {
         }
         if section == .dashboard { refreshDashboard() }
         if section == .route { reloadModelList() }
+        if section == .monitoring { refreshMonitoring() }
+        if section == .security { reloadBackups() }
     }
 
     func present() {
@@ -2060,6 +2703,8 @@ final class SettingsWindowController: NSWindowController {
         updateAppearanceSelectionStates()
         updateRouteFields()
         refreshDashboard()
+        refreshMonitoring()
+        reloadBackups()
         selectSection(.dashboard)
         currentVersionLabel.stringValue = AppUpdateChecker.currentVersion
         checkForUpdates()
@@ -2177,6 +2822,331 @@ final class SettingsWindowController: NSWindowController {
             refreshDashboard()
             dashboardRefreshButton.isEnabled = true
             dashboardRefreshButton.title = "立即刷新"
+        }
+    }
+
+    func refreshMonitoringIfVisible() {
+        guard selectedSection == .monitoring else { return }
+        refreshMonitoring()
+    }
+
+    private func refreshMonitoring() {
+        usageAlertSwitch.state = UsageAlertPreferences.enabled ? .on : .off
+        refreshAlertThresholdContext()
+        let summaries = UsageHistoryStore.dailySummaries(days: 7)
+        historyChart.summaries = summaries
+        let samples = summaries.reduce(0) { $0 + $1.sampleCount }
+        if let latest = UsageHistoryStore.observations().last {
+            historySummaryLabel.stringValue = "近 7 天记录 \(samples) 个采样 · 最近 \(latest.route) \(latest.displayValue)"
+        } else {
+            historySummaryLabel.stringValue = "尚无本地历史；下一次成功刷新后开始记录。"
+        }
+        if let resetAt = appDelegate?.currentUsageObservation()?.resetAt {
+            let relative = RelativeDateTimeFormatter()
+            relative.locale = Locale(identifier: "zh_CN")
+            relative.unitsStyle = .full
+            resetCountdownLabel.stringValue = relative.localizedString(for: resetAt, relativeTo: Date())
+            resetCountdownLabel.textColor = resetAt > Date() ? .labelColor : .secondaryLabelColor
+        } else {
+            resetCountdownLabel.stringValue = "当前数据暂无重置时间"
+            resetCountdownLabel.textColor = .secondaryLabelColor
+        }
+        reloadHealthRows()
+    }
+
+    private func selectedAlertThresholdContext() -> AlertThresholdContext {
+        let agent = selectedAgent()
+        let provider: ProviderProfile?
+        if agent == .cursor {
+            provider = nil
+        } else if agent == .codex {
+            provider = routeControl.selectedSegment == 1
+                ? selectedProviderID.flatMap { ProviderStore.provider(id: $0) }
+                : nil
+        } else {
+            provider = selectedProviderID.flatMap { ProviderStore.provider(id: $0) }
+        }
+
+        if let provider {
+            let metric: UsageAlertMetricKind?
+            switch provider.effectiveVendor {
+            case .zhipuAI, .miniMax:
+                metric = .percentage
+            default:
+                metric = provider.isCodeAPI || provider.effectiveVendor.supportsBalanceLookup
+                    ? .balance
+                    : nil
+            }
+            return AlertThresholdContext(
+                modelKey: "\(agent.rawValue):\(provider.id)",
+                title: "\(agent.displayName) · \(provider.name) · \(provider.model)",
+                metric: metric
+            )
+        }
+
+        let model = officialModelDescription(for: agent)
+        let metric: UsageAlertMetricKind? = agent == .hermes
+            ? appDelegate?.currentUsageObservation().flatMap {
+                $0.remainingPercent != nil ? .percentage : ($0.balance != nil ? .balance : nil)
+            }
+            : .percentage
+        return AlertThresholdContext(
+            modelKey: "\(agent.rawValue):official",
+            title: "\(agent.displayName) · \(model)",
+            metric: metric
+        )
+    }
+
+    private func refreshAlertThresholdContext() {
+        let context = selectedAlertThresholdContext()
+        if let active = appDelegate?.currentUsageObservation() {
+            let activeModel = active.modelName ?? active.route
+            alertContextLabel.stringValue = "当前生效：\(active.agent) · \(activeModel)\n阈值设置：\(context.title)"
+        } else {
+            alertContextLabel.stringValue = "阈值设置：\(context.title)\n当前生效模型的数据尚未读取。"
+        }
+
+        guard let metric = context.metric else {
+            alertThresholdControl.setUnavailable("当前模型不支持")
+            return
+        }
+        let titles = metric == .percentage
+            ? ["5%", "10%", "15%", "20%", "25%", "30%"]
+            : ["$1", "$3", "$5", "$10", "$20", "$50"]
+        let rule = UsageAlertRuleStore.rule(for: context.modelKey, metric: metric)
+        let title = metric == .percentage
+            ? "\(Int(rule.threshold))%"
+            : "$\(Int(rule.threshold))"
+        alertThresholdControl.setOptions(titles, selected: title)
+    }
+
+    private func reloadHealthRows() {
+        healthStack.arrangedSubviews.forEach {
+            healthStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        let candidates = ProviderStore.providers(for: selectedAgent())
+        guard !candidates.isEmpty else {
+            let empty = NSTextField(labelWithString: "当前 Agent 尚未配置第三方提供商。")
+            empty.textColor = .secondaryLabelColor
+            healthStack.addArrangedSubview(padded(empty, horizontal: 0, vertical: 8))
+            return
+        }
+        for (index, provider) in candidates.enumerated() {
+            let snapshot = RouteHealthStore.snapshot(for: provider.id)
+            let state = snapshot?.state ?? .unknown
+            let dot = NSImageView(image: NSImage(systemSymbolName: "circle.fill", accessibilityDescription: state.title)!)
+            dot.symbolConfiguration = .init(pointSize: 9, weight: .medium)
+            switch state {
+            case .healthy: dot.contentTintColor = .systemGreen
+            case .degraded, .checking: dot.contentTintColor = .systemOrange
+            case .offline: dot.contentTintColor = .systemRed
+            case .unknown: dot.contentTintColor = .tertiaryLabelColor
+            }
+            let name = NSTextField(labelWithString: provider.name)
+            name.font = .systemFont(ofSize: 12.5, weight: .semibold)
+            let detailText: String
+            if let snapshot {
+                let latency = snapshot.latencyMilliseconds.map { " · \($0) ms" } ?? ""
+                detailText = "\(state.title)\(latency) · \(snapshot.message)"
+            } else {
+                detailText = "未检测 · \(provider.model)"
+            }
+            let detail = NSTextField(wrappingLabelWithString: detailText)
+            detail.font = .systemFont(ofSize: 11)
+            detail.textColor = .secondaryLabelColor
+            detail.maximumNumberOfLines = 2
+            let text = NSStackView(views: [name, detail])
+            text.orientation = .vertical
+            text.alignment = .leading
+            text.spacing = 3
+            let row = NSStackView(views: [dot, text, NSView()])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 10
+            healthStack.addArrangedSubview(padded(row, horizontal: 0, vertical: 10))
+            row.widthAnchor.constraint(equalTo: healthStack.widthAnchor).isActive = true
+            if index < candidates.count - 1 {
+                let line = separator()
+                healthStack.addArrangedSubview(line)
+                line.widthAnchor.constraint(equalTo: healthStack.widthAnchor).isActive = true
+            }
+        }
+    }
+
+    @objc private func usageAlertsChanged() {
+        let enabled = usageAlertSwitch.state == .on
+        guard enabled else {
+            UsageAlertPreferences.enabled = false
+            return
+        }
+        Task {
+            let authorized = await UsageAlertManager.requestAuthorization()
+            UsageAlertPreferences.enabled = authorized
+            usageAlertSwitch.state = authorized ? .on : .off
+            if authorized {
+                showSuccess("已启用本地用量预警。")
+            } else {
+                showError("系统未授予通知权限，可在系统设置中重新开启。")
+            }
+        }
+    }
+
+    @objc private func alertThresholdChanged() {
+        let context = selectedAlertThresholdContext()
+        guard let metric = context.metric,
+              let title = alertThresholdControl.selectedTitle,
+              let value = Double(title.replacingOccurrences(of: "%", with: "").replacingOccurrences(of: "$", with: "")) else {
+            return
+        }
+        UsageAlertRuleStore.save(
+            UsageAlertRule(metric: metric, threshold: value),
+            for: context.modelKey
+        )
+        alertContextLabel.stringValue += "\n已保存：\(metric.displayName)达到 \(title) 时提醒"
+    }
+
+    @objc private func checkAllRoutes() {
+        let candidates = ProviderStore.providers(for: selectedAgent())
+        guard !candidates.isEmpty else {
+            showError("当前 Agent 尚未配置第三方提供商。")
+            return
+        }
+        checkRoutesButton.isEnabled = false
+        checkRoutesButton.title = "检测中…"
+        Task {
+            for provider in candidates {
+                let snapshot: RouteHealthSnapshot
+                if let key = CredentialStore.load(providerID: provider.id), !key.isEmpty {
+                    snapshot = await RouteHealthChecker.check(profile: provider, key: key)
+                } else {
+                    snapshot = RouteHealthSnapshot(
+                        providerID: provider.id,
+                        state: .offline,
+                        latencyMilliseconds: nil,
+                        checkedAt: Date(),
+                        message: "未配置 API Key"
+                    )
+                }
+                RouteHealthStore.save(snapshot)
+                reloadHealthRows()
+            }
+            checkRoutesButton.isEnabled = true
+            checkRoutesButton.title = "检测全部"
+        }
+    }
+
+    @objc private func exportUsageHistory() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "agent-pulse-usage-history.csv"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        guard let window else { return }
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try UsageHistoryStore.csvData().write(to: url, options: .atomic)
+                self.showSuccess("用量历史已导出。")
+            } catch {
+                self.showError(error.localizedDescription)
+            }
+        }
+    }
+
+    private func reloadBackups() {
+        backupRecords = ConfigBackupCenter.records()
+        backupPopup.removeAllItems()
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        backupPopup.addItems(withTitles: backupRecords.map { "\(formatter.string(from: $0.createdAt)) · \($0.reason)" })
+        restoreBackupButton.isEnabled = !backupRecords.isEmpty
+        backupSelectionChanged()
+    }
+
+    @objc private func backupSelectionChanged() {
+        guard backupPopup.indexOfSelectedItem >= 0,
+              backupPopup.indexOfSelectedItem < backupRecords.count else {
+            backupSummaryLabel.stringValue = "尚无配置备份。"
+            backupDiffText.string = "创建第一份本地配置快照后，这里会显示差异。"
+            return
+        }
+        let record = backupRecords[backupPopup.indexOfSelectedItem]
+        backupSummaryLabel.stringValue = "model_provider: \(record.modelProvider) · \(record.reason)"
+        backupDiffText.string = ConfigBackupCenter.diff(record: record)
+    }
+
+    @objc private func createConfigBackup() {
+        do {
+            _ = try ConfigBackupCenter.create(reason: "手动备份")
+            reloadBackups()
+            showSuccess("配置快照已创建。")
+        } catch {
+            showError(error.localizedDescription)
+        }
+    }
+
+    @objc private func restoreConfigBackup() {
+        guard backupPopup.indexOfSelectedItem >= 0,
+              backupPopup.indexOfSelectedItem < backupRecords.count else { return }
+        let record = backupRecords[backupPopup.indexOfSelectedItem]
+        let alert = NSAlert()
+        alert.messageText = "恢复所选配置？"
+        alert.informativeText = "恢复前会自动备份当前配置。此操作不会修改会话数据库，Codex 需重新启动后读取新配置。"
+        alert.addButton(withTitle: "恢复")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try ConfigBackupCenter.restore(record)
+            providers = ProviderStore.providers()
+            reloadProviderPopups()
+            reloadModelList()
+            reloadBackups()
+            showSuccess("配置已恢复，请重新启动对应 Agent。")
+        } catch {
+            showError(error.localizedDescription)
+        }
+    }
+
+    @objc private func exportSanitizedConfig() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "agent-pulse-config.json"
+        panel.allowedContentTypes = [.json]
+        guard let window else { return }
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try ConfigBackupCenter.exportData().write(to: url, options: .atomic)
+                self.showSuccess("脱敏配置已导出，不包含钥匙串中的 API Key。")
+            } catch {
+                self.showError(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc private func importSanitizedConfig() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        guard let window else { return }
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                let bundle = try ConfigBackupCenter.decodeImport(Data(contentsOf: url))
+                let alert = NSAlert()
+                alert.messageText = "导入配置？"
+                alert.informativeText = "将导入 \(bundle.providers.count) 个提供商元数据。脱敏文件不会覆盖现有 API Key 或含敏感字段的 config.toml。"
+                alert.addButton(withTitle: "导入")
+                alert.addButton(withTitle: "取消")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                try ConfigBackupCenter.importBundle(bundle)
+                self.providers = ProviderStore.providers()
+                self.reloadProviderPopups()
+                self.reloadModelList()
+                self.reloadBackups()
+                self.showSuccess("配置已安全导入；API Key 请在本机重新填写。")
+            } catch {
+                self.showError(error.localizedDescription)
+            }
         }
     }
 

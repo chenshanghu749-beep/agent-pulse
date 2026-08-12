@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.0.2-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.1.2-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -21,6 +21,14 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
 <p align="center">
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse menu bar preview" width="100%">
 </p>
+
+## What's New in 3.1.2
+
+- Added Monitoring and History with per-Agent/model usage or balance alerts, reset timing, route health checks, local trends, and CSV export.
+- Added Configuration and Security with local snapshots, automatic pre-restore backups, redacted diffs, and safe provider import/export.
+- Model selection now uses full-width clickable banners; connection results and latency stay inside each model row, with a monochrome animated selection border.
+- Refined the status appearance gallery, Agent selector, buttons, popup controls, and spacing between menu bar style icons and labels.
+- Configuration backups and usage history stay local, exclude Keychain API keys, and never modify Agent session databases.
 
 ## What's New in 3.0.2
 
@@ -59,7 +67,9 @@ Agent Pulse launches automatically after installation. The default location is `
 | Provider presets | Includes DeepSeek, Zhipu AI, Moonshot, MiniMax, StepFun, MiMo, and Alibaba Model Studio, plus custom providers |
 | Usage dashboard | Review official usage, supported provider balances, and Hermes local tokens, requests, and costs |
 | Task status | Read Codex logs, Cursor Hooks, and Hermes Gateway state: red for execution, yellow for tools, and green for completion |
-| Status appearance | Preview and switch among multiple menu bar indicators in a compact five-column gallery |
+| Monitoring and history | Set per-model alerts, check route health, review local trends, and export CSV |
+| Configuration security | Create local snapshots, preview diffs, restore, and import/export redacted settings |
+| Status appearance | Preview and switch among multiple menu bar indicators in a compact monochrome gallery |
 | Session continuity | Route switching never rewrites the Codex, Cursor, or Hermes session database |
 | model_provider | Read the current Codex value on first launch; edit or restore it from the model and route page |
 
@@ -83,7 +93,7 @@ The menu bar icon continuously reflects the current task status. A three-color t
 
 ## Manual Installation
 
-Download [`Agent-Pulse-3.0.2.dmg`](dist/Agent-Pulse-3.0.2.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
+Download [`Agent-Pulse-3.1.2.dmg`](dist/Agent-Pulse-3.1.2.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
 
 If macOS blocks the first launch, right-click the app in Finder and select `Open`.
 
@@ -97,7 +107,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.0.2.dmg`.
+The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.1.2.dmg`.
 
 ## Privacy and Security
 
@@ -123,4 +133,4 @@ If Agent Pulse is useful to you, you can support its ongoing maintenance through
   <img src="docs/assets/wechat-pay.jpg" alt="WeChat payment QR code" width="320">
 </p>
 
-Current version: `3.0.2`
+Current version: `3.1.2`

@@ -805,10 +805,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMainMenu()
         defer {
             isRefreshingUsage = false
+            recordCurrentUsage()
             rebuildMainMenu()
             updateWidget()
             settings.refreshDashboard()
             settings.refreshBalanceDisplaysIfVisible()
+            settings.refreshMonitoringIfVisible()
         }
 
         do {
@@ -950,6 +952,91 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             latestError = error.localizedDescription
         }
         updateStatusTitle()
+    }
+
+    private func recordCurrentUsage() {
+        guard latestError == nil, let observation = currentUsageObservation() else { return }
+        UsageHistoryStore.record(observation)
+        UsageAlertManager.evaluate(observation)
+    }
+
+    func currentUsageObservation() -> UsageObservation? {
+        let snapshot = dashboardSnapshot()
+        var remainingPercent: Double?
+        var balance: Double?
+        var resetAt: Date?
+        var modelKey = "\(agent.rawValue):official"
+        var modelName: String?
+
+        if agent == .cursor {
+            modelName = "Cursor 官方模型"
+            if CursorUsagePreference.officialUsageEnabled {
+                remainingPercent = latestCursorOfficialUsage?.remainingPercent
+            } else {
+                balance = latestCursorProviderUsage?.balance
+                if let id = CursorUsagePreference.providerID,
+                   let provider = ProviderStore.provider(id: id) {
+                    modelKey = "cursor:\(id)"
+                    modelName = provider.model
+                }
+            }
+        } else if agent == .hermes {
+            balance = latestCodeUsage?.balance ?? Self.numericValue(in: latestProviderBalance?.displayText)
+            remainingPercent = Self.percentValue(in: latestProviderBalance?.displayText)
+            if let id = HermesPreference.providerID,
+               let provider = ProviderStore.provider(id: id) {
+                modelKey = "hermes:\(id)"
+                modelName = provider.model
+            } else {
+                modelName = latestHermesStatus.modelConfig.model
+            }
+        } else {
+            switch route {
+            case .official:
+                remainingPercent = latestOfficialUsage?.primary?.remainingPercent
+                resetAt = latestOfficialUsage?.primary?.resetsAt
+                modelName = ProviderStore.officialModel() ?? "ChatGPT 登录模型"
+            case let .provider(id):
+                modelKey = "codex:\(id)"
+                modelName = ProviderStore.provider(id: id)?.model
+                if ProviderStore.provider(id: id)?.isCodeAPI == true {
+                    balance = latestCodeUsage?.balance
+                } else {
+                    remainingPercent = Self.percentValue(in: latestProviderBalance?.displayText)
+                    balance = Self.numericValue(in: latestProviderBalance?.displayText)
+                }
+            }
+        }
+        guard remainingPercent != nil || balance != nil || snapshot.usageValue != "—" else { return nil }
+        return UsageObservation(
+            recordedAt: Date(),
+            agent: snapshot.agentName,
+            route: snapshot.routeName,
+            metric: snapshot.usageLabel,
+            displayValue: snapshot.usageValue,
+            detail: snapshot.usageDetail,
+            remainingPercent: remainingPercent,
+            balance: balance,
+            resetAt: resetAt,
+            modelKey: modelKey,
+            modelName: modelName
+        )
+    }
+
+    private static func percentValue(in text: String?) -> Double? {
+        guard let text,
+              let range = text.range(of: #"[0-9]+(?:\.[0-9]+)?(?=\s*%)"#, options: .regularExpression) else {
+            return nil
+        }
+        return Double(text[range])
+    }
+
+    private static func numericValue(in text: String?) -> Double? {
+        guard let text, !text.contains("%"),
+              let range = text.range(of: #"-?[0-9]+(?:\.[0-9]+)?"#, options: .regularExpression) else {
+            return nil
+        }
+        return Double(text[range])
     }
 
     private func publishProviderBalance(providerID: String, usage: UsageResponse) {

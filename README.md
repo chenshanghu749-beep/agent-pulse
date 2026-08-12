@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.0.2-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.1.2-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -30,6 +30,14 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 <p align="center">
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse 菜单栏预览" width="100%">
 </p>
+
+## 3.1.2 更新
+
+- 新增“监控与历史”：按 Agent 与模型设置用量或余额提醒、查看重置时间、检测路由健康，并导出本地用量历史。
+- 新增“配置与安全”：创建本地快照、恢复前自动备份、预览脱敏差异，以及安全导入导出提供商配置。
+- 模型列表改为整行 Banner 选择，连接状态与延迟直接显示在对应模型中，选中项使用黑白流动边框。
+- 优化状态与外观页面、Agent 选择区域、按钮和选择控件；菜单栏样式图标与文字间距更清晰。
+- 配置备份与历史数据只保存在本机，不保存或导出钥匙串 API Key，也不修改 Agent 会话数据库。
 
 ## 3.0.2 更新
 
@@ -61,7 +69,9 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 | 提供商预设 | 内置 DeepSeek、智谱 AI、月之暗面、MiniMax、阶跃星辰、MiMo 与阿里百炼云，也支持自定义 |
 | 用量与仪表盘 | 集中查看官方用量、提供商余额，以及 Hermes 本地 Token、请求与费用 |
 | 任务状态 | 支持 Codex 日志、Cursor Hooks 与 Hermes Gateway；红色执行、黄色工具、绿色完成 |
-| 状态外观 | 多种菜单栏状态图标，使用紧凑的五列宫格快速预览和切换 |
+| 监控与历史 | 按模型设置提醒阈值、检测路由状态、查看本地趋势并导出 CSV |
+| 配置与安全 | 本地配置快照、差异预览、恢复与脱敏导入导出 |
+| 状态外观 | 多种菜单栏状态图标，使用紧凑的黑白卡片快速预览和切换 |
 | 会话保持 | 路由切换不改写 Codex、Cursor 或 Hermes 的会话数据库 |
 | model_provider | 首次启动读取 Codex 当前配置，可在模型与路由页面中修改并恢复为 openai |
 
@@ -85,7 +95,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-3.0.2.dmg`](dist/Agent-Pulse-3.0.2.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-3.1.2.dmg`](dist/Agent-Pulse-3.1.2.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -99,7 +109,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.0.2.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.1.2.dmg`。
 
 ## 隐私与安全
 
@@ -130,4 +140,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`3.0.2`
+当前版本：`3.1.2`

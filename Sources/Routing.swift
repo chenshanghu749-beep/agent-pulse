@@ -122,6 +122,21 @@ enum RouteConfigManager {
         try Data(rendered.utf8).write(to: configURL, options: .atomic)
     }
 
+    /// Replaces config.toml after creating the same recoverable backup used by
+    /// route switching. This method never reads or writes Codex session data.
+    static func replaceConfigText(_ content: String) throws {
+        guard !content.contains("<redacted>") else {
+            throw RouteConfigError.invalidRenderedConfig("脱敏导出文件不能直接恢复，请重新填写 API Key 后再导入。")
+        }
+        try validate(content)
+        let directory = configURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if let existing = try? Data(contentsOf: configURL), !existing.isEmpty {
+            try existing.write(to: directory.appendingPathComponent("config.toml.agent-pulse.bak"), options: .atomic)
+        }
+        try Data(content.utf8).write(to: configURL, options: .atomic)
+    }
+
     static func currentRoute() -> RouteChoice {
         guard let content = try? String(contentsOf: configURL, encoding: .utf8) else {
             return .official
