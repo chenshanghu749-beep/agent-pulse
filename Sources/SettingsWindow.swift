@@ -93,6 +93,7 @@ private final class ModelBannerView: TasteCardView {
     private let flowGradientLayer = CAGradientLayer()
     private let flowMask = CAShapeLayer()
     private var selected = false
+    override var acceptsFirstResponder: Bool { true }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -200,6 +201,22 @@ private final class ModelBannerView: TasteCardView {
         guard bounds.contains(convert(event.locationInWindow, from: nil)),
               let bannerAction else { return }
         NSApp.sendAction(bannerAction, to: actionTarget, from: self)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36 || event.keyCode == 49 {
+            if let bannerAction { NSApp.sendAction(bannerAction, to: actionTarget, from: self) }
+            return
+        }
+        if event.keyCode == 125 || event.keyCode == 126,
+           let stack = superview as? NSStackView {
+            let banners = stack.arrangedSubviews.compactMap { $0 as? ModelBannerView }
+            if let index = banners.firstIndex(where: { $0 === self }) {
+                let next = event.keyCode == 125 ? index + 1 : index - 1
+                if banners.indices.contains(next) { window?.makeFirstResponder(banners[next]); return }
+            }
+        }
+        super.keyDown(with: event)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -661,15 +678,16 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private enum Section: Int {
-        case dashboard, route, providerEditor, monitoring, security, appearance, version
+        case dashboard, route, providerEditor, diagnostics, monitoring, security, appearance, version
 
-        static let navigation: [Section] = [.dashboard, .route, .monitoring, .security, .appearance, .version]
+        static let navigation: [Section] = [.dashboard, .route, .diagnostics, .monitoring, .security, .appearance, .version]
 
         var title: String {
             switch self {
             case .dashboard: return "仪表盘"
             case .route: return "模型与路由"
             case .providerEditor: return "提供商配置"
+            case .diagnostics: return "诊断中心"
             case .monitoring: return "监控与历史"
             case .security: return "配置与安全"
             case .appearance: return "状态与外观"
@@ -682,6 +700,7 @@ final class SettingsWindowController: NSWindowController {
             case .dashboard: return "chart.bar.xaxis"
             case .route: return "arrow.triangle.branch"
             case .providerEditor: return "server.rack"
+            case .diagnostics: return "stethoscope"
             case .monitoring: return "waveform.path.ecg"
             case .security: return "lock.shield"
             case .appearance: return "circle.lefthalf.filled"
@@ -700,6 +719,8 @@ final class SettingsWindowController: NSWindowController {
     private var providerBalanceLabels: [String: NSTextField] = [:]
     private var modelTestLabels: [String: NSTextField] = [:]
     private var modelTestMessages: [String: (text: String, color: NSColor, detail: String?)] = [:]
+    private var modelTestTasks: [String: Task<Void, Never>] = [:]
+    private var modelTestTimers: [String: Timer] = [:]
     private var providerBalances: [String: String] = [:]
     private var providerBalanceUpdatedAt: [String: Date] = [:]
     private var providerBalanceRefreshesInFlight: Set<String> = []
@@ -726,8 +747,16 @@ final class SettingsWindowController: NSWindowController {
     private let resetCountdownLabel = NSTextField(labelWithString: "当前数据暂无重置时间")
     private let historyChart = UsageHistoryChartView()
     private let exportHistoryButton = TasteActionButton(title: "导出 CSV", target: nil, action: nil)
+    private let historyRangeControl = NSSegmentedControl(labels: ["7 天", "30 天", "90 天"], trackingMode: .selectOne, target: nil, action: nil)
+    private let historyRetentionPopup = TastePopUpButton()
+    private let clearHistoryButton = TasteActionButton(title: "清除历史", target: nil, action: nil)
     private let healthStack = NSStackView()
     private let checkRoutesButton = TasteActionButton(title: "检测全部", target: nil, action: nil)
+    private let diagnosticStack = NSStackView()
+    private let diagnosticUpdatedLabel = NSTextField(labelWithString: "等待检测")
+    private let refreshDiagnosticsButton = TasteActionButton(title: "重新检测", target: nil, action: nil)
+    private let copyDiagnosticsButton = TasteActionButton(title: "复制诊断报告", target: nil, action: nil)
+    private let reinitializeListenerButton = TasteActionButton(title: "重置状态监听", target: nil, action: nil)
     private let backupPopup = TastePopUpButton()
     private let backupSummaryLabel = NSTextField(wrappingLabelWithString: "尚无配置备份")
     private let backupDiffText = NSTextView()
@@ -735,6 +764,9 @@ final class SettingsWindowController: NSWindowController {
     private let restoreBackupButton = TasteActionButton(title: "恢复", target: nil, action: nil)
     private let exportConfigButton = TasteActionButton(title: "脱敏导出", target: nil, action: nil)
     private let importConfigButton = TasteActionButton(title: "导入", target: nil, action: nil)
+    private let restoreScopePopup = TastePopUpButton()
+    private let openConfigFolderButton = TasteActionButton(title: "打开配置目录", target: nil, action: nil)
+    private let openBackupFolderButton = TasteActionButton(title: "打开备份目录", target: nil, action: nil)
     private var backupRecords: [ConfigBackupRecord] = []
 
     private let agentControl = NSSegmentedControl(
@@ -944,6 +976,7 @@ final class SettingsWindowController: NSWindowController {
         pages[.dashboard] = buildDashboardPage()
         pages[.route] = buildRoutePage()
         pages[.providerEditor] = buildProvidersPage()
+        pages[.diagnostics] = buildDiagnosticsPage()
         pages[.monitoring] = buildMonitoringPage()
         pages[.security] = buildSecurityPage()
         pages[.appearance] = buildAppearancePage()
@@ -1003,9 +1036,23 @@ final class SettingsWindowController: NSWindowController {
         exportHistoryButton.target = self
         exportHistoryButton.action = #selector(exportUsageHistory)
         exportHistoryButton.role = .secondary
+        historyRangeControl.target = self
+        historyRangeControl.action = #selector(historyRangeChanged)
+        historyRangeControl.selectedSegment = 0
+        historyRetentionPopup.addItems(withTitles: ["保留 30 天", "保留 90 天", "保留 180 天"])
+        historyRetentionPopup.target = self
+        historyRetentionPopup.action = #selector(historyRetentionChanged)
+        clearHistoryButton.target = self
+        clearHistoryButton.action = #selector(clearUsageHistory)
         checkRoutesButton.target = self
         checkRoutesButton.action = #selector(checkAllRoutes)
         checkRoutesButton.role = .primary
+        refreshDiagnosticsButton.target = self
+        refreshDiagnosticsButton.action = #selector(refreshDiagnostics)
+        copyDiagnosticsButton.target = self
+        copyDiagnosticsButton.action = #selector(copyDiagnosticReport)
+        reinitializeListenerButton.target = self
+        reinitializeListenerButton.action = #selector(reinitializeTaskListener)
         backupPopup.target = self
         backupPopup.action = #selector(backupSelectionChanged)
         createBackupButton.target = self
@@ -1016,7 +1063,14 @@ final class SettingsWindowController: NSWindowController {
         exportConfigButton.action = #selector(exportSanitizedConfig)
         importConfigButton.target = self
         importConfigButton.action = #selector(importSanitizedConfig)
-        [createBackupButton, restoreBackupButton, exportConfigButton, importConfigButton, exportHistoryButton, checkRoutesButton].forEach {
+        restoreScopePopup.addItems(withTitles: ConfigRestoreScope.allCases.map(\.displayName))
+        openConfigFolderButton.target = self
+        openConfigFolderButton.action = #selector(openConfigFolder)
+        openBackupFolderButton.target = self
+        openBackupFolderButton.action = #selector(openBackupFolder)
+        [createBackupButton, restoreBackupButton, exportConfigButton, importConfigButton, exportHistoryButton,
+         checkRoutesButton, refreshDiagnosticsButton, copyDiagnosticsButton, reinitializeListenerButton,
+         clearHistoryButton, openConfigFolderButton, openBackupFolderButton].forEach {
             $0.heightAnchor.constraint(equalToConstant: 34).isActive = true
         }
         configureActionButton(createBackupButton, symbol: "plus", role: .primary)
@@ -1025,6 +1079,12 @@ final class SettingsWindowController: NSWindowController {
         configureActionButton(importConfigButton, symbol: "square.and.arrow.down", role: .secondary)
         configureActionButton(exportHistoryButton, symbol: "tablecells", role: .secondary)
         configureActionButton(checkRoutesButton, symbol: "bolt.horizontal.circle", role: .primary)
+        configureActionButton(refreshDiagnosticsButton, symbol: "arrow.clockwise", role: .primary)
+        configureActionButton(copyDiagnosticsButton, symbol: "doc.on.doc", role: .secondary)
+        configureActionButton(reinitializeListenerButton, symbol: "waveform.path", role: .secondary)
+        configureActionButton(clearHistoryButton, symbol: "trash", role: .secondary)
+        configureActionButton(openConfigFolderButton, symbol: "folder", role: .secondary)
+        configureActionButton(openBackupFolderButton, symbol: "archivebox", role: .secondary)
         backupPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdates)
@@ -1787,12 +1847,25 @@ final class SettingsWindowController: NSWindowController {
     }
 
     @objc private func testModelRow(_ sender: ProviderActionButton) {
-        sender.isEnabled = false
         let key = sender.providerID ?? "official"
-        setModelTestPresentation(key: key, text: "检测中…", color: .systemOrange)
+        if let task = modelTestTasks.removeValue(forKey: key) {
+            task.cancel()
+            stopModelTestCountdown(key: key)
+            resetModelTestButton(sender)
+            setModelTestPresentation(key: key, text: "已取消", color: .secondaryLabelColor)
+            return
+        }
+        sender.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "取消检测")
+        sender.toolTip = "取消检测"
+        startModelTestCountdown(key: key)
         let agent = selectedAgent()
-        Task {
-            defer { sender.isEnabled = true }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.modelTestTasks.removeValue(forKey: key)
+                self.stopModelTestCountdown(key: key)
+                self.resetModelTestButton(sender)
+            }
             do {
                 if sender.representsOfficial {
                     if agent == .codex {
@@ -1809,7 +1882,7 @@ final class SettingsWindowController: NSWindowController {
                     }
                     setModelTestPresentation(
                         key: key,
-                        text: "连接正常",
+                        text: "连接正常 · \(modelTestTime())",
                         color: .systemGreen,
                         detail: "\(officialProviderName(for: agent))连接正常。"
                     )
@@ -1821,27 +1894,28 @@ final class SettingsWindowController: NSWindowController {
                     throw SettingsError.missingCredential
                 }
                 let snapshot = await RouteHealthChecker.check(profile: provider, key: key)
+                try Task.checkCancellation()
                 RouteHealthStore.save(snapshot)
                 switch snapshot.state {
                 case .healthy:
                     let latency = snapshot.latencyMilliseconds.map { " · \($0) ms" } ?? ""
                     setModelTestPresentation(
                         key: provider.id,
-                        text: "连接正常\(latency)",
+                        text: "连接正常\(latency) · \(modelTestTime())",
                         color: .systemGreen,
                         detail: snapshot.message
                     )
                 case .degraded:
                     setModelTestPresentation(
                         key: provider.id,
-                        text: "服务可达",
+                        text: "鉴权需检查 · \(modelTestTime())",
                         color: .systemOrange,
                         detail: snapshot.message
                     )
                 case .offline:
                     setModelTestPresentation(
                         key: provider.id,
-                        text: "连接异常",
+                        text: "连接异常 · \(modelTestTime())",
                         color: .systemRed,
                         detail: snapshot.message
                     )
@@ -1853,15 +1927,59 @@ final class SettingsWindowController: NSWindowController {
                         detail: snapshot.message
                     )
                 }
+            } catch is CancellationError {
+                return
             } catch {
+                let classification: String
+                if let connectionError = error as? ProviderConnectionError {
+                    switch connectionError {
+                    case .timeout: classification = "连接超时"
+                    case .modelUnavailable: classification = "模型不存在"
+                    case let .server(code, _) where code == 401 || code == 403: classification = "鉴权失败"
+                    default: classification = "连接异常"
+                    }
+                } else {
+                    classification = "连接异常"
+                }
                 setModelTestPresentation(
                     key: key,
-                    text: "连接异常",
+                    text: "\(classification) · \(modelTestTime())",
                     color: .systemRed,
                     detail: error.localizedDescription
                 )
             }
         }
+        modelTestTasks[key] = task
+    }
+
+    private func startModelTestCountdown(key: String) {
+        stopModelTestCountdown(key: key)
+        let deadline = Date().addingTimeInterval(15)
+        setModelTestPresentation(key: key, text: "检测中 · 15s", color: .systemOrange)
+        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.modelTestTasks[key] != nil else { return }
+                let seconds = max(0, Int(ceil(deadline.timeIntervalSinceNow)))
+                self.setModelTestPresentation(key: key, text: "检测中 · \(seconds)s", color: .systemOrange)
+            }
+        }
+        modelTestTimers[key] = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopModelTestCountdown(key: String) {
+        modelTestTimers.removeValue(forKey: key)?.invalidate()
+    }
+
+    private func resetModelTestButton(_ button: ProviderActionButton) {
+        button.image = NSImage(systemSymbolName: "bolt.horizontal.circle", accessibilityDescription: "测试连接")
+        button.toolTip = "测试连接"
+    }
+
+    private func modelTestTime() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: Date())
     }
 
     @objc private func editModelRow(_ sender: ProviderActionButton) {
@@ -2112,6 +2230,35 @@ final class SettingsWindowController: NSWindowController {
         return stack
     }
 
+    private func buildDiagnosticsPage() -> NSView {
+        diagnosticStack.orientation = .horizontal
+        diagnosticStack.alignment = .top
+        diagnosticStack.distribution = .fillEqually
+        diagnosticStack.spacing = 0
+        diagnosticUpdatedLabel.font = .monospacedDigitSystemFont(ofSize: 11.5, weight: .regular)
+        diagnosticUpdatedLabel.textColor = .secondaryLabelColor
+        diagnosticUpdatedLabel.isSelectable = true
+
+        let actions = NSStackView(views: [refreshDiagnosticsButton, copyDiagnosticsButton, reinitializeListenerButton])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 8
+        let header = NSStackView(views: [diagnosticUpdatedLabel, NSView(), actions])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 12
+
+        return page(
+            title: "诊断中心",
+            subtitle: "集中检查 Agent、路由、模型、余额刷新与状态监听；报告会自动脱敏。",
+            cards: [card([
+                padded(header, horizontal: 22, vertical: 16),
+                separator(),
+                padded(diagnosticStack, horizontal: 22, vertical: 10)
+            ], interactive: true)]
+        )
+    }
+
     private func buildMonitoringPage() -> NSView {
         historySummaryLabel.font = .systemFont(ofSize: 12)
         historySummaryLabel.textColor = .secondaryLabelColor
@@ -2163,11 +2310,24 @@ final class SettingsWindowController: NSWindowController {
             padded(healthStack, horizontal: 22, vertical: 8)
         ], interactive: true)
 
-        let historyHeader = NSStackView(views: [historySummaryLabel, NSView(), exportHistoryButton])
+        let historyActions = NSStackView(views: [historyRangeControl, exportHistoryButton])
+        historyActions.orientation = .horizontal
+        historyActions.alignment = .centerY
+        historyActions.spacing = 8
+        let historyHeader = NSStackView(views: [historySummaryLabel, NSView(), historyActions])
         historyHeader.orientation = .horizontal
         historyHeader.alignment = .centerY
         historyHeader.spacing = 12
-        let historyContent = NSStackView(views: [historyHeader, historyChart])
+        let retentionControls = NSStackView(views: [historyRetentionPopup, clearHistoryButton])
+        retentionControls.orientation = .horizontal
+        retentionControls.alignment = .centerY
+        retentionControls.spacing = 8
+        let retentionRow = settingRow(
+            title: "历史保留",
+            detail: "按 Agent、提供商与模型保存在本机；可调整保留周期或清空全部记录。",
+            control: retentionControls
+        )
+        let historyContent = NSStackView(views: [historyHeader, historyChart, separator(), retentionRow])
         historyContent.orientation = .vertical
         historyContent.alignment = .leading
         historyContent.spacing = 14
@@ -2188,7 +2348,7 @@ final class SettingsWindowController: NSWindowController {
         backupSummaryLabel.maximumNumberOfLines = 2
         backupPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 250).isActive = true
 
-        let selectionControls = NSStackView(views: [backupPopup, restoreBackupButton])
+        let selectionControls = NSStackView(views: [backupPopup, restoreScopePopup, restoreBackupButton])
         selectionControls.orientation = .horizontal
         selectionControls.alignment = .centerY
         selectionControls.spacing = 8
@@ -2237,6 +2397,13 @@ final class SettingsWindowController: NSWindowController {
                     ),
                     separator(),
                     padded(backupSummaryLabel, horizontal: 22, vertical: 13)
+                ], interactive: true),
+                card([
+                    settingRow(
+                        title: "本地目录",
+                        detail: "直接打开 Codex 配置目录或 Agent Pulse 的本地备份目录。",
+                        control: NSStackView(views: [openConfigFolderButton, openBackupFolderButton])
+                    )
                 ], interactive: true),
                 card([
                     padded(sectionHeading(title: "配置差异", detail: "敏感字段在预览与导出中始终脱敏。"), horizontal: 22, vertical: 15),
@@ -2666,6 +2833,7 @@ final class SettingsWindowController: NSWindowController {
         }
         if section == .dashboard { refreshDashboard() }
         if section == .route { reloadModelList() }
+        if section == .diagnostics { renderDiagnostics() }
         if section == .monitoring { refreshMonitoring() }
         if section == .security { reloadBackups() }
     }
@@ -2830,16 +2998,105 @@ final class SettingsWindowController: NSWindowController {
         refreshMonitoring()
     }
 
+    private func renderDiagnostics() {
+        diagnosticStack.arrangedSubviews.forEach {
+            diagnosticStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        guard let report = appDelegate?.diagnosticReport() else { return }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        diagnosticUpdatedLabel.stringValue = "检测时间 \(formatter.string(from: report.generatedAt))"
+        let splitIndex = Int(ceil(Double(report.rows.count) / 2))
+        let columns = [NSStackView(), NSStackView()]
+        columns.forEach {
+            $0.orientation = .vertical
+            $0.alignment = .leading
+            $0.spacing = 0
+            diagnosticStack.addArrangedSubview($0)
+        }
+        for (index, item) in report.rows.enumerated() {
+            let title = NSTextField(labelWithString: item.title)
+            title.font = .systemFont(ofSize: 12, weight: .semibold)
+            title.textColor = .secondaryLabelColor
+            title.widthAnchor.constraint(equalToConstant: 96).isActive = true
+            let value = NSTextField(wrappingLabelWithString: item.value)
+            value.font = .systemFont(ofSize: 11.5)
+            value.textColor = item.isWarning ? .systemOrange : .labelColor
+            value.maximumNumberOfLines = 2
+            value.lineBreakMode = .byTruncatingMiddle
+            value.isSelectable = true
+            let row = NSStackView(views: [title, value])
+            row.orientation = .horizontal
+            row.alignment = .top
+            row.spacing = 10
+            let columnIndex = index < splitIndex ? 0 : 1
+            let localIndex = columnIndex == 0 ? index : index - splitIndex
+            let columnCount = columnIndex == 0 ? splitIndex : report.rows.count - splitIndex
+            let cell = padded(row, horizontal: columnIndex == 0 ? 0 : 14, vertical: 9)
+            columns[columnIndex].addArrangedSubview(cell)
+            cell.widthAnchor.constraint(equalTo: columns[columnIndex].widthAnchor).isActive = true
+            if localIndex < columnCount - 1 {
+                let line = separator()
+                columns[columnIndex].addArrangedSubview(line)
+                line.widthAnchor.constraint(equalTo: columns[columnIndex].widthAnchor).isActive = true
+            }
+        }
+        if report.rows.count > 1 {
+            columns[0].widthAnchor.constraint(equalTo: columns[1].widthAnchor).isActive = true
+        }
+    }
+
+    @objc private func refreshDiagnostics() {
+        refreshDiagnosticsButton.isEnabled = false
+        Task {
+            await appDelegate?.refreshDashboardData()
+            renderDiagnostics()
+            refreshDiagnosticsButton.isEnabled = true
+        }
+    }
+
+    @objc private func copyDiagnosticReport() {
+        guard let report = appDelegate?.diagnosticReport() else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report.redactedText, forType: .string)
+        showSuccess("脱敏诊断报告已复制。")
+    }
+
+    @objc private func reinitializeTaskListener() {
+        reinitializeListenerButton.isEnabled = false
+        reinitializeListenerButton.title = "正在重置…"
+        Task {
+            await appDelegate?.reinitializeTaskMonitoring()
+            renderDiagnostics()
+            reinitializeListenerButton.isEnabled = true
+            reinitializeListenerButton.title = "重置状态监听"
+            showSuccess("状态监听已重新初始化。")
+        }
+    }
+
     private func refreshMonitoring() {
         usageAlertSwitch.state = UsageAlertPreferences.enabled ? .on : .off
         refreshAlertThresholdContext()
-        let summaries = UsageHistoryStore.dailySummaries(days: 7)
+        let days = [7, 30, 90][max(0, historyRangeControl.selectedSegment)]
+        let summaries = UsageHistoryStore.dailySummaries(days: days)
         historyChart.summaries = summaries
         let samples = summaries.reduce(0) { $0 + $1.sampleCount }
+        let tokens = summaries.reduce(0) { $0 + $1.totalTokens }
+        let cost = summaries.reduce(0) { $0 + $1.totalCost }
         if let latest = UsageHistoryStore.observations().last {
-            historySummaryLabel.stringValue = "近 7 天记录 \(samples) 个采样 · 最近 \(latest.route) \(latest.displayValue)"
+            let usage = tokens > 0 || cost > 0
+                ? " · \(tokens) Token · $\(String(format: "%.2f", cost))"
+                : ""
+            historySummaryLabel.stringValue = "近 \(days) 天 \(samples) 个采样\(usage) · 最近 \(latest.agent) / \(latest.route)"
         } else {
             historySummaryLabel.stringValue = "尚无本地历史；下一次成功刷新后开始记录。"
+        }
+        switch UsageHistoryPreferences.retentionDays {
+        case 30: historyRetentionPopup.selectItem(at: 0)
+        case 180: historyRetentionPopup.selectItem(at: 2)
+        default: historyRetentionPopup.selectItem(at: 1)
         }
         if let resetAt = appDelegate?.currentUsageObservation()?.resetAt {
             let relative = RelativeDateTimeFormatter()
@@ -3052,13 +3309,34 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
+    @objc private func historyRangeChanged() { refreshMonitoring() }
+
+    @objc private func historyRetentionChanged() {
+        UsageHistoryPreferences.retentionDays = [30, 90, 180][max(0, historyRetentionPopup.indexOfSelectedItem)]
+        refreshMonitoring()
+    }
+
+    @objc private func clearUsageHistory() {
+        let alert = NSAlert()
+        alert.messageText = "清除全部用量历史？"
+        alert.informativeText = "仅删除 Agent Pulse 本机保存的采样记录，不影响提供商账户与会话。"
+        alert.addButton(withTitle: "清除")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        UsageHistoryStore.clear()
+        refreshMonitoring()
+        showSuccess("本地用量历史已清除。")
+    }
+
     private func reloadBackups() {
         backupRecords = ConfigBackupCenter.records()
         backupPopup.removeAllItems()
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        backupPopup.addItems(withTitles: backupRecords.map { "\(formatter.string(from: $0.createdAt)) · \($0.reason)" })
+        backupPopup.addItems(withTitles: backupRecords.map {
+            "\(formatter.string(from: $0.createdAt)) · \($0.name ?? $0.reason)"
+        })
         restoreBackupButton.isEnabled = !backupRecords.isEmpty
         backupSelectionChanged()
     }
@@ -3071,13 +3349,29 @@ final class SettingsWindowController: NSWindowController {
             return
         }
         let record = backupRecords[backupPopup.indexOfSelectedItem]
-        backupSummaryLabel.stringValue = "model_provider: \(record.modelProvider) · \(record.reason)"
+        let note = record.note.map { " · \($0)" } ?? ""
+        backupSummaryLabel.stringValue = "model_provider: \(record.modelProvider) · \(record.name ?? record.reason)\(note)"
         backupDiffText.string = ConfigBackupCenter.diff(record: record)
     }
 
     @objc private func createConfigBackup() {
+        let alert = NSAlert()
+        alert.messageText = "创建配置快照"
+        alert.informativeText = "可填写名称与备注，方便之后识别。"
+        let name = NSTextField(string: "手动备份")
+        name.placeholderString = "快照名称"
+        let note = NSTextField()
+        note.placeholderString = "备注（可选）"
+        let fields = NSStackView(views: [name, note])
+        fields.orientation = .vertical
+        fields.spacing = 8
+        fields.frame = NSRect(x: 0, y: 0, width: 320, height: 64)
+        alert.accessoryView = fields
+        alert.addButton(withTitle: "创建")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
-            _ = try ConfigBackupCenter.create(reason: "手动备份")
+            _ = try ConfigBackupCenter.create(reason: "手动备份", name: name.stringValue, note: note.stringValue)
             reloadBackups()
             showSuccess("配置快照已创建。")
         } catch {
@@ -3089,14 +3383,15 @@ final class SettingsWindowController: NSWindowController {
         guard backupPopup.indexOfSelectedItem >= 0,
               backupPopup.indexOfSelectedItem < backupRecords.count else { return }
         let record = backupRecords[backupPopup.indexOfSelectedItem]
+        let scope = ConfigRestoreScope.allCases[max(0, restoreScopePopup.indexOfSelectedItem)]
         let alert = NSAlert()
         alert.messageText = "恢复所选配置？"
-        alert.informativeText = "恢复前会自动备份当前配置。此操作不会修改会话数据库，Codex 需重新启动后读取新配置。"
+        alert.informativeText = "恢复范围：\(scope.displayName)。恢复前会自动备份当前配置，不会修改会话数据库。"
         alert.addButton(withTitle: "恢复")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
-            try ConfigBackupCenter.restore(record)
+            try ConfigBackupCenter.restore(record, scope: scope)
             providers = ProviderStore.providers()
             reloadProviderPopups()
             reloadModelList()
@@ -3132,9 +3427,10 @@ final class SettingsWindowController: NSWindowController {
             guard response == .OK, let url = panel.url else { return }
             do {
                 let bundle = try ConfigBackupCenter.decodeImport(Data(contentsOf: url))
+                let preview = ConfigBackupCenter.previewImport(bundle)
                 let alert = NSAlert()
                 alert.messageText = "导入配置？"
-                alert.informativeText = "将导入 \(bundle.providers.count) 个提供商元数据。脱敏文件不会覆盖现有 API Key 或含敏感字段的 config.toml。"
+                alert.informativeText = "\(preview.summary)\n\n\(preview.diff.prefix(900))"
                 alert.addButton(withTitle: "导入")
                 alert.addButton(withTitle: "取消")
                 guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -3148,6 +3444,15 @@ final class SettingsWindowController: NSWindowController {
                 self.showError(error.localizedDescription)
             }
         }
+    }
+
+    @objc private func openConfigFolder() {
+        NSWorkspace.shared.activateFileViewerSelecting([RouteConfigManager.configURL])
+    }
+
+    @objc private func openBackupFolder() {
+        try? FileManager.default.createDirectory(at: ConfigBackupCenter.rootURL, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(ConfigBackupCenter.rootURL)
     }
 
     @objc private func routeChanged() {
@@ -3681,29 +3986,27 @@ final class SettingsWindowController: NSWindowController {
                 return
             }
 
-            let authSnapshot: CodexAuthSnapshot
-            do {
-                authSnapshot = try CodexAuthStore.snapshot()
-            } catch {
-                showError(error.localizedDescription)
-                confirmButton.isEnabled = true
-                updateConfirmButtonTitle()
-                return
-            }
-
             statusLabel.stringValue = "正在关闭 Codex…"
             var codexWasStopped = false
-            var authPreparation = CodexAuthPreparation.ready
+            var switchResult: RouteSwitchTransactionResult?
             do {
+                try RouteSwitchTransaction.preflight(route)
                 try await CodexLauncher.terminate()
                 codexWasStopped = true
-                statusLabel.stringValue = "正在切换认证状态…"
-                authPreparation = try CodexAuthStore.prepareForSwitch(to: route)
-                statusLabel.stringValue = "正在更新路由配置…"
-                try RouteConfigManager.apply(route)
+                statusLabel.stringValue = "正在备份并验证路由…"
+                switchResult = try RouteSwitchTransaction.apply(route)
+                statusLabel.stringValue = "正在打开并确认 Codex…"
+                try await CodexLauncher.launch()
+                try? await Task.sleep(for: .milliseconds(600))
+                guard RouteConfigManager.currentRoute() == route else {
+                    throw RouteSwitchTransactionError.verificationFailed
+                }
             } catch {
-                try? CodexAuthStore.restore(authSnapshot)
-                if codexWasStopped {
+                if let switchResult {
+                    if CodexLauncher.isRunning { try? await CodexLauncher.terminate() }
+                    RouteSwitchTransaction.rollback(switchResult)
+                }
+                if codexWasStopped && !CodexLauncher.isRunning {
                     try? await CodexLauncher.launch()
                 }
                 showError(error.localizedDescription)
@@ -3711,6 +4014,8 @@ final class SettingsWindowController: NSWindowController {
                 updateConfirmButtonTitle()
                 return
             }
+
+            let authPreparation = switchResult?.authPreparation ?? .ready
 
             AgentPreference.selected = .codex
             appDelegate?.agentDidChange(to: .codex)
@@ -3722,14 +4027,8 @@ final class SettingsWindowController: NSWindowController {
             }
             confirmButton.title = "切换成功"
             window?.close()
-
-            do {
-                try await CodexLauncher.launch()
-                if authPreparation.requiresOfficialLogin {
-                    appDelegate?.presentOfficialLoginRequired()
-                }
-            } catch {
-                appDelegate?.presentLaunchWarning(error.localizedDescription)
+            if authPreparation.requiresOfficialLogin {
+                appDelegate?.presentOfficialLoginRequired()
             }
         }
     }

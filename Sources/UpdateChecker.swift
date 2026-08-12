@@ -79,6 +79,10 @@ enum AppUpdateChecker {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
     }
 
+    static var currentBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+    }
+
     private static let remoteInfoURL = URL(
         string: "https://raw.githubusercontent.com/\(AppIdentity.repository)/main/Resources/Info.plist"
     )!

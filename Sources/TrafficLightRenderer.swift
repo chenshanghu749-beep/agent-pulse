@@ -122,24 +122,34 @@ enum StatusIconRenderer {
         }
     }
 
-    static func image(style: StatusIconStyle, active: TrafficSignal, frame: Int = 0) -> NSImage {
+    static func image(
+        style: StatusIconStyle,
+        active: TrafficSignal,
+        frame: Int = 0,
+        appearance requestedAppearance: NSAppearance? = nil
+    ) -> NSImage {
         let phase = animationPhase(style: style, active: active, frame: frame)
-        let effectiveAppearance = NSApp?.effectiveAppearance ?? NSAppearance(named: .aqua)!
+        let effectiveAppearance = requestedAppearance
+            ?? NSApp?.effectiveAppearance
+            ?? NSAppearance(named: .aqua)!
         let appearance = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? "dark"
             : "light"
         let cacheKey = "\(style.rawValue)|\(String(describing: active))|\(phase)|\(appearance)" as NSString
         if let cached = imageCache.object(forKey: cacheKey) { return cached }
-        let image: NSImage
-        switch style {
-        case .trafficLight: image = trafficLight(active: active)
-        case .lightBulb: image = lightBulb(active: active)
-        case .basketballMascot: image = basketballMascot(active: active, frame: phase)
-        case .trumpMascot: image = trumpMascot(active: active, frame: phase)
-        case .pinwheel: image = pinwheel(active: active, phase: phase, phaseCount: 72)
-        case .gears: image = gears(active: active, phase: phase, phaseCount: 120)
-        case .statusRing: image = statusRing(active: active)
+        var renderedImage: NSImage?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            switch style {
+            case .trafficLight: renderedImage = trafficLight(active: active)
+            case .lightBulb: renderedImage = lightBulb(active: active)
+            case .basketballMascot: renderedImage = basketballMascot(active: active, frame: phase)
+            case .trumpMascot: renderedImage = trumpMascot(active: active, frame: phase)
+            case .pinwheel: renderedImage = pinwheel(active: active, phase: phase, phaseCount: 72)
+            case .gears: renderedImage = gears(active: active, phase: phase, phaseCount: 120)
+            case .statusRing: renderedImage = statusRing(active: active)
+            }
         }
+        let image = renderedImage ?? NSImage(size: NSSize(width: 18, height: 18))
         image.isTemplate = false
         image.accessibilityDescription = "\(style.displayName)状态图标"
         imageCache.setObject(image, forKey: cacheKey)
@@ -151,15 +161,19 @@ enum StatusIconRenderer {
         active: TrafficSignal,
         frame: Int,
         title: String,
-        font: NSFont
+        font: NSFont,
+        appearance requestedAppearance: NSAppearance? = nil
     ) -> NSImage {
         let phase = animationPhase(style: style, active: active, frame: frame)
-        let appearance = appearanceKey()
+        let effectiveAppearance = requestedAppearance
+            ?? NSApp?.effectiveAppearance
+            ?? NSAppearance(named: .aqua)!
+        let appearance = appearanceKey(for: effectiveAppearance)
         let fontName = font.fontDescriptor.postscriptName ?? font.fontName
         let cacheKey = "status-item|\(style.rawValue)|\(String(describing: active))|\(phase)|\(title)|\(fontName)|\(font.pointSize)|\(appearance)" as NSString
         if let cached = statusItemImageCache.object(forKey: cacheKey) { return cached }
 
-        let icon = image(style: style, active: active, frame: frame)
+        let icon = image(style: style, active: active, frame: frame, appearance: effectiveAppearance)
         let text = statusTextImage(title: title, font: font, appearance: appearance)
         let spacing: CGFloat = title.isEmpty ? 0 : 4
         let width = ceil(icon.size.width + spacing + text.size.width)
@@ -240,9 +254,10 @@ enum StatusIconRenderer {
         let cacheKey = "status-text|\(title)|\(fontName)|\(font.pointSize)|\(appearance)" as NSString
         if let cached = statusTextImageCache.object(forKey: cacheKey) { return cached }
 
+        let textColor: NSColor = appearance == "dark" ? .white : .black
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.labelColor
+            .foregroundColor: textColor
         ]
         let attributedTitle = NSAttributedString(string: title, attributes: attributes)
         let measured = attributedTitle.boundingRect(
@@ -262,8 +277,7 @@ enum StatusIconRenderer {
         return image
     }
 
-    private static func appearanceKey() -> String {
-        let effectiveAppearance = NSApp?.effectiveAppearance ?? NSAppearance(named: .aqua)!
+    private static func appearanceKey(for effectiveAppearance: NSAppearance) -> String {
         return effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? "dark"
             : "light"

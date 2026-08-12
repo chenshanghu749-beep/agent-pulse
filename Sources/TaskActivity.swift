@@ -12,6 +12,13 @@ struct TaskActivitySnapshot: Sendable, Equatable {
     let changedAt: Date?
 }
 
+struct TaskActivityCompatibilityInfo: Sendable {
+    let rootExists: Bool
+    let recentSessionCount: Int
+    let latestEventAt: Date?
+    let summary: String
+}
+
 struct TaskActivityFileEvent: Sendable {
     let path: String
     let flags: FSEventStreamEventFlags
@@ -227,6 +234,32 @@ enum TaskActivityReader {
         return TaskActivitySnapshot(state: .ready, changedAt: nil)
     }
 
+    static func compatibilityInfo(root customRoot: URL? = nil, now: Date = Date()) -> TaskActivityCompatibilityInfo {
+        let root = customRoot ?? defaultRootURL
+        let exists = FileManager.default.fileExists(atPath: root.path)
+        let files = indexedFiles(
+            root: root,
+            cutoff: now.addingTimeInterval(-48 * 60 * 60),
+            fileEvents: [],
+            forceFileScan: true
+        )
+        let latest = files.map(\.1).max()
+        let summary: String
+        if !exists {
+            summary = "监听目录不存在"
+        } else if files.isEmpty {
+            summary = "监听正常，近 48 小时没有会话事件"
+        } else {
+            summary = "监听正常，已兼容任务、回合与工具事件"
+        }
+        return TaskActivityCompatibilityInfo(
+            rootExists: exists,
+            recentSessionCount: files.count,
+            latestEventAt: latest,
+            summary: summary
+        )
+    }
+
     private static func indexedFiles(
         root: URL,
         cutoff: Date,
@@ -323,9 +356,10 @@ enum TaskActivityReader {
             switch object["type"] as? String {
             case "event_msg":
                 switch type {
-                case "task_started":
+                case "task_started", "turn_started", "agent_turn_started", "response_started":
                     latest = FileState(state: .running(1), timestamp: timestamp, pendingTools: 0)
-                case "task_complete", "task_cancelled", "turn_aborted":
+                case "task_complete", "turn_complete", "task_completed", "response_completed",
+                     "task_cancelled", "turn_aborted", "turn_cancelled":
                     latest = FileState(state: .ready, timestamp: timestamp, pendingTools: 0)
                 default:
                     continue
@@ -333,14 +367,17 @@ enum TaskActivityReader {
             case "response_item":
                 guard var state = latest else { continue }
                 switch type {
-                case "custom_tool_call", "function_call":
+                case "custom_tool_call", "function_call", "local_shell_call", "shell_call",
+                     "mcp_tool_call", "computer_tool_call", "web_search_call":
                     guard state.state != .ready else { continue }
                     sawToolCall = true
                     state.pendingTools += 1
                     state.state = .waiting(1)
                     state.timestamp = timestamp
                     latest = state
-                case "custom_tool_call_output", "function_call_output":
+                case "custom_tool_call_output", "function_call_output", "local_shell_call_output",
+                     "shell_call_output", "mcp_tool_call_output", "computer_tool_call_output",
+                     "web_search_call_output":
                     guard state.state != .ready else { continue }
                     state.pendingTools = max(0, state.pendingTools - 1)
                     state.state = state.pendingTools > 0 ? .waiting(1) : .running(1)

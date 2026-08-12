@@ -14,13 +14,28 @@ struct UsageObservation: Codable, Equatable, Sendable {
     let resetAt: Date?
     let modelKey: String?
     let modelName: String?
+    let tokens: Int?
+    let cost: Double?
 }
 
 struct UsageDailySummary: Sendable {
     let date: Date
     let minimumRemainingPercent: Double?
     let latestBalance: Double?
+    let totalTokens: Int
+    let totalCost: Double
     let sampleCount: Int
+}
+
+enum UsageHistoryPreferences {
+    private static let retentionKey = "usageHistoryRetentionDays"
+    static var retentionDays: Int {
+        get {
+            let value = UserDefaults.standard.integer(forKey: retentionKey)
+            return [30, 90, 180].contains(value) ? value : 90
+        }
+        set { UserDefaults.standard.set([30, 90, 180].contains(newValue) ? newValue : 90, forKey: retentionKey) }
+    }
 }
 
 enum UsageHistoryStore {
@@ -44,7 +59,7 @@ enum UsageHistoryStore {
                 return
             }
             values.append(observation)
-            let cutoff = Date().addingTimeInterval(-90 * 86_400)
+            let cutoff = Date().addingTimeInterval(-Double(UsageHistoryPreferences.retentionDays) * 86_400)
             values = Array(values.filter { $0.recordedAt >= cutoff }.suffix(10_000))
             saveUnlocked(values)
         }
@@ -63,20 +78,31 @@ enum UsageHistoryStore {
                 date: date,
                 minimumRemainingPercent: samples.compactMap(\.remainingPercent).min(),
                 latestBalance: samples.last(where: { $0.balance != nil })?.balance,
+                totalTokens: samples.compactMap(\.tokens).reduce(0, +),
+                totalCost: samples.compactMap(\.cost).reduce(0, +),
                 sampleCount: samples.count
             )
         }
     }
 
+    static func clear() {
+        queue.sync {
+            cachedValues = []
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+
     static func csvData() -> Data {
-        var rows = ["recorded_at,agent,route,metric,value,detail,remaining_percent,balance,reset_at"]
+        var rows = ["recorded_at,agent,route,model,metric,value,detail,remaining_percent,balance,tokens,cost,reset_at"]
         let formatter = ISO8601DateFormatter()
         for value in observations() {
             let rawColumns: [String] = [
-                formatter.string(from: value.recordedAt), value.agent, value.route, value.metric,
+                formatter.string(from: value.recordedAt), value.agent, value.route, value.modelName ?? "", value.metric,
                 value.displayValue, value.detail,
                 value.remainingPercent.map { String($0) } ?? "",
                 value.balance.map { String($0) } ?? "",
+                value.tokens.map { String($0) } ?? "",
+                value.cost.map { String($0) } ?? "",
                 value.resetAt.map { formatter.string(from: $0) } ?? ""
             ]
             let columns = rawColumns.map { csvEscape($0) }
@@ -191,6 +217,7 @@ enum UsageAlertRuleStore {
 }
 
 enum UsageAlertManager {
+    private static let cooldown: TimeInterval = 12 * 60 * 60
     static func level(for remaining: Double) -> String? {
         if remaining <= UsageAlertPreferences.criticalThreshold { return "critical" }
         if remaining <= UsageAlertPreferences.warningThreshold { return "warning" }
@@ -223,8 +250,9 @@ enum UsageAlertManager {
         } else { return }
         let resetKey = observation.resetAt.map { String(Int($0.timeIntervalSince1970)) } ?? "none"
         let key = "usageAlert.\(modelKey).\(alertRule.metric.rawValue).\(alertRule.threshold).\(resetKey)"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
+        let lastSent = UserDefaults.standard.object(forKey: key) as? Date
+        guard lastSent.map({ Date().timeIntervalSince($0) >= cooldown }) ?? true else { return }
+        UserDefaults.standard.set(Date(), forKey: key)
 
         let content = UNMutableNotificationContent()
         content.title = "Agent Pulse：\(alertRule.metric.displayName)提醒"
@@ -270,12 +298,41 @@ struct RouteHealthSnapshot: Codable, Sendable {
 
 enum RouteHealthStore {
     private static let lock = NSLock()
-    private static var values: [String: RouteHealthSnapshot] = [:]
+    private static var values: [String: RouteHealthSnapshot] = load()
+    private static var fileURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Agent Pulse", isDirectory: true)
+            .appendingPathComponent("route-health.json")
+    }
     static func snapshot(for providerID: String) -> RouteHealthSnapshot? {
         lock.withLock { values[providerID] }
     }
     static func save(_ snapshot: RouteHealthSnapshot) {
-        lock.withLock { values[snapshot.providerID] = snapshot }
+        lock.withLock {
+            values[snapshot.providerID] = snapshot
+            persist(values)
+        }
+    }
+
+    private static func load() -> [String: RouteHealthSnapshot] {
+        guard let data = try? Data(contentsOf: fileURL) else { return [:] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([String: RouteHealthSnapshot].self, from: data)) ?? [:]
+    }
+
+    private static func persist(_ snapshots: [String: RouteHealthSnapshot]) {
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(snapshots).write(to: fileURL, options: .atomic)
+        } catch {
+            NSLog("Agent Pulse failed to persist route health: %@", error.localizedDescription)
+        }
     }
 }
 
@@ -324,12 +381,29 @@ final class UsageHistoryChartView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard !summaries.isEmpty else { return }
+        let hasPercentage = summaries.contains { $0.minimumRemainingPercent != nil }
+        let maximumBalance = summaries.compactMap(\.latestBalance).max() ?? 0
+        let maximumTokens = summaries.map(\.totalTokens).max() ?? 0
+        let maximumCost = summaries.map(\.totalCost).max() ?? 0
         let width = bounds.width / CGFloat(summaries.count)
         for (index, summary) in summaries.enumerated() {
-            let value = summary.minimumRemainingPercent ?? (summary.sampleCount > 0 ? 100 : 0)
+            let value: Double
+            if hasPercentage {
+                value = summary.minimumRemainingPercent ?? 0
+            } else if maximumBalance > 0 {
+                value = (summary.latestBalance ?? 0) / maximumBalance * 100
+            } else if maximumTokens > 0 {
+                value = Double(summary.totalTokens) / Double(maximumTokens) * 100
+            } else if maximumCost > 0 {
+                value = summary.totalCost / maximumCost * 100
+            } else {
+                value = 0
+            }
             let height = max(3, bounds.height * CGFloat(value / 100))
             let rect = NSRect(x: CGFloat(index) * width + 5, y: 0, width: max(4, width - 10), height: height)
-            let color: NSColor = value <= 10 ? .systemRed : (value <= 20 ? .systemOrange : .labelColor)
+            let color: NSColor = hasPercentage && value <= 10
+                ? .systemRed
+                : (hasPercentage && value <= 20 ? .systemOrange : .labelColor)
             color.withAlphaComponent(summary.sampleCount == 0 ? 0.12 : 0.82).setFill()
             NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
         }

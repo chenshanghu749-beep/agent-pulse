@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.1.2-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.2.0-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -31,6 +31,16 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse 菜单栏预览" width="100%">
 </p>
 
+## 3.2.0 更新
+
+- 新增诊断中心：集中展示 Agent、版本路径、路由模型、余额刷新、任务事件、状态监听与配置冲突，并支持复制脱敏报告。
+- Codex 路由切换升级为安全事务：切换前预检与自动备份，写入和启动后再次验证，失败时自动恢复认证与 `config.toml`，始终不修改会话数据库。
+- 扩展新版 Codex 任务事件兼容，支持识别状态长期停留，并可一键重新初始化任务监听。
+- 监控历史支持 7/30/90 天趋势、Token 与费用汇总、保留周期、清空记录、通知冷却，以及跨重启保存路由健康状态。
+- 配置快照支持名称、备注和选择恢复范围；导入前显示新增、修改、删除预览，并检查重复配置与无效 URL。
+- 模型连接检测支持倒计时、取消、时间戳和鉴权失败、模型不存在、连接超时分类；模型卡片支持键盘选择。
+- 修复深色应用主题下风车/齿轮菜单栏文字颜色错误，以及诊断中心内容被滚动容器裁剪的问题。
+
 ## 3.1.2 更新
 
 - 新增“监控与历史”：按 Agent 与模型设置用量或余额提醒、查看重置时间、检测路由健康，并导出本地用量历史。
@@ -45,20 +55,6 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 - 停止启动时自动迁移旧会话，路由切换保留现有 `model_provider`，不改写 Codex 会话数据库。
 - 新增 Codex 专属 `model_provider` 配置入口，修改前自动备份 `config.toml`。
 - “立即更新”支持退出应用后在后台下载、校验、安装并自动重新打开。
-
-## 3.0.1 更新
-
-- 新增黑白双齿轮状态图标，两个齿轮反向旋转。
-- 执行、等待、完成状态分别使用高速、中速和低速转动。
-- 使用原生合成状态栏图像，主屏与分屏动画保持同步。
-
-## 3.0.0 更新
-
-- 新增 Hermes Agent：支持安装检测、快速启动、提供商与模型切换。
-- 支持读取 Hermes 任务状态、今日 Token、API 请求次数与本地费用。
-- Hermes 配置了支持余额查询的提供商时，仪表盘和状态栏优先展示余额；无余额数据时回退展示 Token。
-- 切换 Hermes 模型前自动备份原配置，不重启正在运行的 Hermes 任务。
-
 
 ## 核心功能
 
@@ -95,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-3.1.2.dmg`](dist/Agent-Pulse-3.1.2.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-3.2.0.dmg`](dist/Agent-Pulse-3.2.0.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -109,7 +105,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.1.2.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.2.0.dmg`。
 
 ## 隐私与安全
 
@@ -140,4 +136,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`3.1.2`
+当前版本：`3.2.0`

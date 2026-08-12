@@ -1087,6 +1087,39 @@ if CommandLine.arguments.contains("--login-status-test") {
         frame: 12
     ).size.width)
     precondition(compositeStatusImage.tiffRepresentation != nil)
+    let testApplication = NSApplication.shared
+    let previousAppAppearance = testApplication.appearance
+    testApplication.appearance = NSAppearance(named: .darkAqua)
+    let lightMenuBarComposite = StatusIconRenderer.statusItemImage(
+        style: .pinwheel,
+        active: .green,
+        frame: 0,
+        title: "TEST",
+        font: .systemFont(ofSize: 12, weight: .medium),
+        appearance: NSAppearance(named: .aqua)!
+    )
+    let lightMenuBarBitmap = lightMenuBarComposite.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))
+    var lightMenuBarTextSamples: [CGFloat] = []
+    if let lightMenuBarBitmap {
+        let textStart = Int(Double(lightMenuBarBitmap.pixelsWide) * 0.48)
+        for y in 0..<lightMenuBarBitmap.pixelsHigh {
+            for x in textStart..<lightMenuBarBitmap.pixelsWide {
+                guard let color = lightMenuBarBitmap.colorAt(x: x, y: y),
+                      color.alphaComponent > 0.25 else { continue }
+                lightMenuBarTextSamples.append(
+                    (color.redComponent + color.greenComponent + color.blueComponent) / 3
+                )
+            }
+        }
+    }
+    let lightMenuBarTextBrightness = lightMenuBarTextSamples.reduce(0, +)
+        / CGFloat(max(lightMenuBarTextSamples.count, 1))
+    guard lightMenuBarTextBrightness < 0.35 else {
+        let message = "SELF_TEST_ERROR status color samples=\(lightMenuBarTextSamples.count) brightness=\(lightMenuBarTextBrightness)\n"
+        try? FileHandle.standardError.write(contentsOf: Data(message.utf8))
+        exit(EXIT_FAILURE)
+    }
+    testApplication.appearance = previousAppAppearance
     precondition(StatusIconStyle.gears.usesCompositeStatusItemImage)
     let gearRedPhase = StatusIconRenderer.animationPhase(style: .gears, active: .red, frame: 18)
     let gearYellowPhase = StatusIconRenderer.animationPhase(style: .gears, active: .yellow, frame: 18)

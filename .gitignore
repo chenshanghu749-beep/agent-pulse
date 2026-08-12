@@ -16,4 +16,4 @@ Tests/codex-home/tmp/
 
 # DMGs are ignored except for the verified installer published by this project.
 *.dmg
-!dist/Agent-Pulse-2.7.0.dmg
+!dist/Agent-Pulse-3.2.0.dmg

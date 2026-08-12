@@ -108,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var usageTimer: Timer?
     private var taskTimer: Timer?
     private var taskActivityMonitor: TaskActivityMonitor?
+    private var taskMonitorActive = false
     private var iconAnimationTimer: Timer?
     private var startupChaseTimer: Timer?
     private var startupChaseIndex: Int?
@@ -568,8 +569,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         lastStatusRenderKey = renderKey
-        let oldImage = StatusIconRenderer.image(style: statusIconStyle, active: previousSignal, frame: animationFrame)
-        let newImage = StatusIconRenderer.image(style: statusIconStyle, active: targetSignal, frame: animationFrame)
+        let oldImage = StatusIconRenderer.image(
+            style: statusIconStyle,
+            active: previousSignal,
+            frame: animationFrame,
+            appearance: button.effectiveAppearance
+        )
+        let newImage = StatusIconRenderer.image(
+            style: statusIconStyle,
+            active: targetSignal,
+            frame: animationFrame,
+            appearance: button.effectiveAppearance
+        )
         let statusImage: NSImage
         if progress >= 1 {
             displayedSignal = targetSignal
@@ -593,7 +604,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 active: targetSignal,
                 frame: animationFrame,
                 title: statusTitleText,
-                font: button.font ?? .systemFont(ofSize: 12, weight: .medium)
+                font: button.font ?? .systemFont(ofSize: 12, weight: .medium),
+                appearance: button.effectiveAppearance
             )
             isUsingNativeStatusImage = true
             statusIconPlaceholderSize = composite.size
@@ -657,7 +669,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 active: targetSignal,
                 frame: animationFrame,
                 title: statusTitleText,
-                font: button.font ?? .systemFont(ofSize: 12, weight: .medium)
+                font: button.font ?? .systemFont(ofSize: 12, weight: .medium),
+                appearance: button.effectiveAppearance
             )
             return
         }
@@ -787,6 +800,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         await refreshTaskActivity(forceFileScan: true)
         await refreshUsage()
         settings.refreshDashboard()
+    }
+
+    func diagnosticReport() -> AgentPulseDiagnosticReport {
+        let appURL: URL?
+        switch agent {
+        case .codex:
+            appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: CodexLauncher.bundleIdentifier)
+        case .cursor:
+            appURL = CursorLauncher.applicationURL()
+        case .hermes:
+            appURL = HermesLauncher.applicationURL()
+        }
+        let version = appURL.flatMap {
+            Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        } ?? (agent == .hermes ? latestHermesStatus.version : nil)
+        return DiagnosticsCenter.makeReport(
+            agent: agent,
+            route: route,
+            task: taskSnapshot,
+            lastUsageRefresh: lastUpdated,
+            latestError: latestError,
+            monitorActive: taskMonitorActive,
+            agentPath: appURL?.path,
+            agentVersion: version
+        )
+    }
+
+    func reinitializeTaskMonitoring() async {
+        taskActivityMonitor?.stop()
+        taskActivityMonitor = nil
+        taskMonitorActive = false
+        pendingTaskFileEvents.removeAll(keepingCapacity: false)
+        pendingTaskForceScan = false
+        startTaskActivityMonitor()
+        await refreshTaskActivity(forceFileScan: true)
     }
 
     @objc private func manualRefresh() { Task { await refreshUsage() } }
@@ -967,6 +1015,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var resetAt: Date?
         var modelKey = "\(agent.rawValue):official"
         var modelName: String?
+        var tokens: Int?
+        var cost: Double?
 
         if agent == .cursor {
             modelName = "Cursor 官方模型"
@@ -983,6 +1033,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if agent == .hermes {
             balance = latestCodeUsage?.balance ?? Self.numericValue(in: latestProviderBalance?.displayText)
             remainingPercent = Self.percentValue(in: latestProviderBalance?.displayText)
+            tokens = latestHermesUsage?.totalTokens
+            cost = latestHermesUsage?.displayCostUSD
             if let id = HermesPreference.providerID,
                let provider = ProviderStore.provider(id: id) {
                 modelKey = "hermes:\(id)"
@@ -1001,6 +1053,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 modelName = ProviderStore.provider(id: id)?.model
                 if ProviderStore.provider(id: id)?.isCodeAPI == true {
                     balance = latestCodeUsage?.balance
+                    tokens = latestCodeUsage?.usage.today.totalTokens
+                    cost = latestCodeUsage?.usage.today.actualCost
                 } else {
                     remainingPercent = Self.percentValue(in: latestProviderBalance?.displayText)
                     balance = Self.numericValue(in: latestProviderBalance?.displayText)
@@ -1019,7 +1073,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             balance: balance,
             resetAt: resetAt,
             modelKey: modelKey,
-            modelName: modelName
+            modelName: modelName,
+            tokens: tokens,
+            cost: cost
         )
     }
 
@@ -1341,7 +1397,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         taskActivityMonitor = monitor
-        _ = monitor.start()
+        taskMonitorActive = monitor.start()
     }
 
     private func refreshTaskActivity(
