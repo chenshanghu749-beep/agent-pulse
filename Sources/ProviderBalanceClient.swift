@@ -5,6 +5,19 @@ struct ProviderBalanceSnapshot: Sendable, Equatable {
     let detail: String
 }
 
+enum ProviderBalanceRefreshPolicy {
+    static let maxAge: TimeInterval = 45
+
+    static func shouldRefresh(
+        lastUpdated: Date?,
+        now: Date = Date(),
+        maxAge: TimeInterval = ProviderBalanceRefreshPolicy.maxAge
+    ) -> Bool {
+        guard let lastUpdated else { return true }
+        return now.timeIntervalSince(lastUpdated) >= maxAge
+    }
+}
+
 enum ProviderBalanceError: LocalizedError {
     case unsupported
     case missingManagementCredential

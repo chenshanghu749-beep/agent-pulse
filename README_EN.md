@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.0.1-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.0.2-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -21,6 +21,13 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
 <p align="center">
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse menu bar preview" width="100%">
 </p>
+
+## What's New in 3.0.2
+
+- Fixed stale balances in the model configuration list; official usage and provider balances now stay synchronized with the menu bar.
+- Disabled automatic legacy-session migration at startup, preserved the existing `model_provider` during route changes, and kept the Codex session database read-only.
+- Added a Codex-only `model_provider` editor with automatic `config.toml` backups.
+- `Update Now` can quit the app, download and verify the installer in the background, install it, and reopen Agent Pulse automatically.
 
 ## What's New in 3.0.1
 
@@ -76,7 +83,7 @@ The menu bar icon continuously reflects the current task status. A three-color t
 
 ## Manual Installation
 
-Download [`Agent-Pulse-3.0.1.dmg`](dist/Agent-Pulse-3.0.1.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
+Download [`Agent-Pulse-3.0.2.dmg`](dist/Agent-Pulse-3.0.2.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
 
 If macOS blocks the first launch, right-click the app in Finder and select `Open`.
 
@@ -90,7 +97,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.0.1.dmg`.
+The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.0.2.dmg`.
 
 ## Privacy and Security
 
@@ -116,4 +123,4 @@ If Agent Pulse is useful to you, you can support its ongoing maintenance through
   <img src="docs/assets/wechat-pay.jpg" alt="WeChat payment QR code" width="320">
 </p>
 
-Current version: `3.0.1`
+Current version: `3.0.2`

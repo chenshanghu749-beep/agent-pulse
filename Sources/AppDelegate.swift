@@ -808,6 +808,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rebuildMainMenu()
             updateWidget()
             settings.refreshDashboard()
+            settings.refreshBalanceDisplaysIfVisible()
         }
 
         do {
@@ -837,6 +838,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     if let key = CredentialStore.load(providerID: id), !key.isEmpty {
                         do {
                             latestCursorProviderUsage = try await CodeAPIClient.fetch(key: key)
+                            if let usage = latestCursorProviderUsage {
+                                publishProviderBalance(providerID: id, usage: usage)
+                            }
                         } catch {
                             errors.append("\(provider.name)：\(error.localizedDescription)")
                         }
@@ -872,6 +876,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     if provider.isCodeAPI {
                         do {
                             latestCodeUsage = try await CodeAPIClient.fetch(key: key)
+                            if let usage = latestCodeUsage {
+                                publishProviderBalance(providerID: id, usage: usage)
+                            }
                         } catch {
                             errors.append("\(provider.name)：\(error.localizedDescription)")
                         }
@@ -885,6 +892,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                 apiKey: key,
                                 managementKey: managementKey
                             )
+                            if let balance = latestProviderBalance {
+                                settings.providerBalanceDidRefresh(providerID: id, snapshot: balance)
+                            }
                         } catch {
                             errors.append("\(provider.name)余额：\(error.localizedDescription)")
                         }
@@ -911,6 +921,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 latestProviderBalance = nil
                 if provider.isCodeAPI {
                     latestCodeUsage = try await CodeAPIClient.fetch(key: key)
+                    if let usage = latestCodeUsage {
+                        publishProviderBalance(providerID: id, usage: usage)
+                    }
                 } else if provider.effectiveVendor.supportsBalanceLookup {
                     let managementKey = CredentialStore.load(
                         providerID: ProviderBalanceClient.managementCredentialID(for: provider.id)
@@ -922,6 +935,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                             apiKey: key,
                             managementKey: managementKey
                         )
+                        if let balance = latestProviderBalance {
+                            settings.providerBalanceDidRefresh(providerID: id, snapshot: balance)
+                        }
                     }
                 }
             case .official:
@@ -934,6 +950,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             latestError = error.localizedDescription
         }
         updateStatusTitle()
+    }
+
+    private func publishProviderBalance(providerID: String, usage: UsageResponse) {
+        settings.providerBalanceDidRefresh(
+            providerID: providerID,
+            snapshot: ProviderBalanceSnapshot(
+                displayText: String(format: "余额 $%.2f", usage.balance),
+                detail: "CodeAPI 账户余额"
+            )
+        )
     }
 
     private func rebuildMainMenu() {

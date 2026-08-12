@@ -665,6 +665,16 @@ if CommandLine.arguments.contains("--login-status-test") {
         exit(EXIT_FAILURE)
     }
     try! AppUpdateInstaller.validateHelperScriptForTesting()
+    let balanceRefreshNow = Date(timeIntervalSince1970: 10_000)
+    precondition(ProviderBalanceRefreshPolicy.shouldRefresh(lastUpdated: nil, now: balanceRefreshNow))
+    precondition(!ProviderBalanceRefreshPolicy.shouldRefresh(
+        lastUpdated: balanceRefreshNow.addingTimeInterval(-44),
+        now: balanceRefreshNow
+    ))
+    precondition(ProviderBalanceRefreshPolicy.shouldRefresh(
+        lastUpdated: balanceRefreshNow.addingTimeInterval(-45),
+        now: balanceRefreshNow
+    ))
     precondition(AgentKind.codex.supportsModelProviderConfiguration)
     precondition(!AgentKind.cursor.supportsModelProviderConfiguration)
     precondition(!AgentKind.hermes.supportsModelProviderConfiguration)

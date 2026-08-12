@@ -368,6 +368,9 @@ final class SettingsWindowController: NSWindowController {
     private var providerRows: [String: TasteCardView] = [:]
     private var providerBalanceLabels: [String: NSTextField] = [:]
     private var providerBalances: [String: String] = [:]
+    private var providerBalanceUpdatedAt: [String: Date] = [:]
+    private var providerBalanceRefreshesInFlight: Set<String> = []
+    private weak var officialBalanceLabel: NSTextField?
     private let pageHost = NSView()
     private let modelListStack = NSStackView()
     private let addProviderButton = TasteActionButton()
@@ -908,6 +911,7 @@ final class SettingsWindowController: NSWindowController {
         }
         providerRows.removeAll(keepingCapacity: true)
         providerBalanceLabels.removeAll(keepingCapacity: true)
+        officialBalanceLabel = nil
 
         let agent = selectedAgent()
         modelProviderCard?.isHidden = !agent.supportsModelProviderConfiguration
@@ -1037,7 +1041,11 @@ final class SettingsWindowController: NSWindowController {
         balance.textColor = .labelColor
         balance.alignment = .right
         balance.widthAnchor.constraint(greaterThanOrEqualToConstant: 88).isActive = true
-        if let provider { providerBalanceLabels[provider.id] = balance }
+        if let provider {
+            providerBalanceLabels[provider.id] = balance
+        } else {
+            officialBalanceLabel = balance
+        }
 
         let testButton = modelActionButton(
             symbol: "bolt.horizontal.circle",
@@ -1237,11 +1245,16 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private func refreshProviderBalances(_ visibleProviders: [ProviderProfile], agent: AgentKind) {
-        for provider in visibleProviders where providerBalances[provider.id] == nil {
+        let now = Date()
+        for provider in visibleProviders {
             if !provider.effectiveVendor.supportsBalanceLookup && !provider.isCodeAPI { continue }
+            guard !providerBalanceRefreshesInFlight.contains(provider.id),
+                  ProviderBalanceRefreshPolicy.shouldRefresh(
+                      lastUpdated: providerBalanceUpdatedAt[provider.id],
+                      now: now
+                  ) else { continue }
             guard let key = CredentialStore.load(providerID: provider.id), !key.isEmpty else {
-                providerBalances[provider.id] = "余额 未配置"
-                providerBalanceLabels[provider.id]?.stringValue = "余额 未配置"
+                storeProviderBalance("余额 未配置", providerID: provider.id, toolTip: nil)
                 continue
             }
             let loadingText: String
@@ -1249,9 +1262,13 @@ final class SettingsWindowController: NSWindowController {
             case .zhipuAI, .miniMax: loadingText = "配额读取中"
             default: loadingText = "余额读取中"
             }
-            providerBalances[provider.id] = loadingText
-            providerBalanceLabels[provider.id]?.stringValue = loadingText
+            if providerBalances[provider.id] == nil {
+                providerBalances[provider.id] = loadingText
+                providerBalanceLabels[provider.id]?.stringValue = loadingText
+            }
+            providerBalanceRefreshesInFlight.insert(provider.id)
             Task {
+                defer { providerBalanceRefreshesInFlight.remove(provider.id) }
                 do {
                     let managementKey = CredentialStore.load(
                         providerID: ProviderBalanceClient.managementCredentialID(for: provider.id)
@@ -1261,19 +1278,52 @@ final class SettingsWindowController: NSWindowController {
                         apiKey: key,
                         managementKey: managementKey
                     )
-                    providerBalances[provider.id] = snapshot.displayText
-                    guard selectedAgent() == agent else { return }
-                    providerBalanceLabels[provider.id]?.stringValue = snapshot.displayText
+                    storeProviderBalance(
+                        snapshot.displayText,
+                        providerID: provider.id,
+                        toolTip: snapshot.detail,
+                        expectedAgent: agent
+                    )
                 } catch {
                     let unavailable = provider.effectiveVendor == .zhipuAI || provider.effectiveVendor == .miniMax
                         ? "配额不可用" : "余额不可用"
-                    providerBalances[provider.id] = unavailable
-                    guard selectedAgent() == agent else { return }
-                    providerBalanceLabels[provider.id]?.stringValue = unavailable
-                    providerBalanceLabels[provider.id]?.toolTip = error.localizedDescription
+                    storeProviderBalance(
+                        unavailable,
+                        providerID: provider.id,
+                        toolTip: error.localizedDescription,
+                        expectedAgent: agent
+                    )
                 }
             }
         }
+    }
+
+    private func storeProviderBalance(
+        _ text: String,
+        providerID: String,
+        toolTip: String?,
+        expectedAgent: AgentKind? = nil
+    ) {
+        providerBalances[providerID] = text
+        providerBalanceUpdatedAt[providerID] = Date()
+        guard expectedAgent == nil || selectedAgent() == expectedAgent else { return }
+        providerBalanceLabels[providerID]?.stringValue = text
+        providerBalanceLabels[providerID]?.toolTip = toolTip
+    }
+
+    func providerBalanceDidRefresh(providerID: String, snapshot: ProviderBalanceSnapshot) {
+        storeProviderBalance(
+            snapshot.displayText,
+            providerID: providerID,
+            toolTip: snapshot.detail
+        )
+    }
+
+    func refreshBalanceDisplaysIfVisible() {
+        guard window?.isVisible == true, selectedSection == .route else { return }
+        let agent = selectedAgent()
+        officialBalanceLabel?.stringValue = balanceText(for: nil, agent: agent)
+        refreshProviderBalances(providers.filter { $0.supports(agent) }, agent: agent)
     }
 
     @objc private func selectModelRow(_ sender: ProviderActionButton) {
@@ -2482,6 +2532,9 @@ final class SettingsWindowController: NSWindowController {
                 providerID: ProviderBalanceClient.managementCredentialID(for: id)
             )
             providers.remove(at: index)
+            providerBalances.removeValue(forKey: id)
+            providerBalanceUpdatedAt.removeValue(forKey: id)
+            providerBalanceRefreshesInFlight.remove(id)
             selectedProviderID = nil
             if CursorUsagePreference.providerID == id {
                 CursorUsagePreference.providerID = nil
@@ -2500,6 +2553,7 @@ final class SettingsWindowController: NSWindowController {
         do {
             let profile = try persistCurrentProvider()
             providerBalances.removeValue(forKey: profile.id)
+            providerBalanceUpdatedAt.removeValue(forKey: profile.id)
             reloadModelList()
             showSuccess("已保存 \(profile.name)。")
             selectSection(.route)
