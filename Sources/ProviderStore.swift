@@ -4,12 +4,14 @@ enum ProviderAPIFormat: String, Codable, CaseIterable, Sendable {
     case automatic
     case responses
     case chatCompletions
+    case anthropicMessages
 
     var displayName: String {
         switch self {
         case .automatic: return "自动识别"
         case .responses: return "Responses API"
         case .chatCompletions: return "Chat Completions（旧配置）"
+        case .anthropicMessages: return "Anthropic Messages API"
         }
     }
 }
@@ -209,7 +211,8 @@ struct ProviderProfile: Codable, Equatable, Identifiable, Sendable {
 
     var effectiveAPIFormat: ProviderAPIFormat {
         switch apiFormat ?? .automatic {
-        case .automatic, .chatCompletions, .responses: return .responses
+        case .automatic: return .responses
+        case .chatCompletions, .responses, .anthropicMessages: return apiFormat ?? .responses
         }
     }
 

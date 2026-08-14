@@ -123,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var latestCursorProviderUsage: UsageResponse?
     private var latestHermesStatus = HermesStatus.unavailable
     private var latestHermesUsage: HermesUsageSnapshot?
+    private var latestCLIStatuses: [AgentKind: CLIAgentStatus] = [:]
     private var cursorHooksNeedRestart = false
     private var latestError: String?
     private var lastUpdated: Date?
@@ -465,6 +466,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             )
             return
         }
+        if agent == .claude || agent == .openCode {
+            let status = latestCLIStatuses[agent] ?? .unavailable(agent)
+            let provider = CLIAgentPreference.providerID(for: agent)
+                .flatMap { ProviderStore.provider(id: $0) }
+            let value: String
+            if let balance = latestCodeUsage?.balance {
+                value = money(balance)
+            } else if let balance = latestProviderBalance {
+                value = compact(balance.displayText)
+            } else {
+                value = compact(provider?.model ?? status.config.model)
+            }
+            applyStatusTitle(
+                "\(agent.displayName) · \(value)",
+                toolTip: "Agent Pulse · \(agent.displayName) · \(status.detail)",
+                to: button
+            )
+            return
+        }
         let title: String
         switch route {
         case let .provider(id):
@@ -743,6 +763,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             usageLabel = presentation.usageLabel
             usageValue = presentation.usageValue
             usageDetail = presentation.usageDetail
+        } else if agent == .claude || agent == .openCode {
+            let status = latestCLIStatuses[agent] ?? .unavailable(agent)
+            let provider = CLIAgentPreference.providerID(for: agent)
+                .flatMap { ProviderStore.provider(id: $0) }
+            routeName = provider?.name ?? status.config.provider
+            if let balance = latestCodeUsage?.balance {
+                usageLabel = "提供商余额"
+                usageValue = money(balance)
+                usageDetail = provider.map { "\($0.model) · \($0.baseURL)" } ?? status.detail
+            } else if let balance = latestProviderBalance {
+                usageLabel = balance.displayText.hasPrefix("配额 ") ? "提供商配额" : "提供商余额"
+                usageValue = balance.displayText
+                    .replacingOccurrences(of: "余额 ", with: "")
+                    .replacingOccurrences(of: "配额 ", with: "")
+                usageDetail = "\(balance.detail) · \(provider?.model ?? status.config.model)"
+            } else {
+                usageLabel = "当前模型"
+                usageValue = provider?.model ?? status.config.model
+                usageDetail = status.installed ? status.detail : "未找到 \(agent.displayName) CLI"
+            }
         } else {
             switch route {
             case .official:
@@ -811,10 +851,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             appURL = CursorLauncher.applicationURL()
         case .hermes:
             appURL = HermesLauncher.applicationURL()
+        case .claude:
+            appURL = ClaudeCodeIntegration.cliURL()
+        case .openCode:
+            appURL = OpenCodeIntegration.cliURL()
         }
         let version = appURL.flatMap {
             Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        } ?? (agent == .hermes ? latestHermesStatus.version : nil)
+        } ?? (agent == .hermes
+            ? latestHermesStatus.version
+            : latestCLIStatuses[agent]?.version)
         return DiagnosticsCenter.makeReport(
             agent: agent,
             route: route,
@@ -955,6 +1001,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 updateStatusTitle()
                 return
             }
+            if agent == .claude || agent == .openCode {
+                let selectedAgent = agent
+                let status = await Task.detached(priority: .utility) {
+                    selectedAgent == .claude
+                        ? ClaudeCodeIntegration.readStatus()
+                        : OpenCodeIntegration.readStatus()
+                }.value
+                latestCLIStatuses[selectedAgent] = status
+                latestCodeUsage = nil
+                latestProviderBalance = nil
+                var errors: [String] = status.installed ? [] : [status.detail]
+                if let id = CLIAgentPreference.providerID(for: selectedAgent),
+                   let provider = ProviderStore.provider(id: id),
+                   provider.supports(selectedAgent) {
+                    if let key = CredentialStore.load(providerID: id), !key.isEmpty {
+                        if provider.isCodeAPI {
+                            do {
+                                latestCodeUsage = try await CodeAPIClient.fetch(key: key)
+                                if let usage = latestCodeUsage {
+                                    publishProviderBalance(providerID: id, usage: usage)
+                                }
+                            } catch {
+                                errors.append("\(provider.name)：\(error.localizedDescription)")
+                            }
+                        } else if provider.effectiveVendor.supportsBalanceLookup {
+                            let managementKey = CredentialStore.load(
+                                providerID: ProviderBalanceClient.managementCredentialID(for: provider.id)
+                            )
+                            do {
+                                latestProviderBalance = try await ProviderBalanceClient.fetch(
+                                    profile: provider,
+                                    apiKey: key,
+                                    managementKey: managementKey
+                                )
+                                if let balance = latestProviderBalance {
+                                    settings.providerBalanceDidRefresh(providerID: id, snapshot: balance)
+                                }
+                            } catch {
+                                errors.append("\(provider.name)余额：\(error.localizedDescription)")
+                            }
+                        }
+                    } else {
+                        errors.append("\(provider.name) 尚未配置 API Key")
+                    }
+                }
+                latestError = errors.isEmpty ? nil : errors.joined(separator: "；")
+                lastUpdated = Date()
+                updateStatusTitle()
+                return
+            }
             switch route {
             case let .provider(id):
                 guard let provider = ProviderStore.provider(id: id) else {
@@ -1042,6 +1138,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 modelName = latestHermesStatus.modelConfig.model
             }
+        } else if agent == .claude || agent == .openCode {
+            balance = latestCodeUsage?.balance ?? Self.numericValue(in: latestProviderBalance?.displayText)
+            remainingPercent = Self.percentValue(in: latestProviderBalance?.displayText)
+            if let id = CLIAgentPreference.providerID(for: agent),
+               let provider = ProviderStore.provider(id: id) {
+                modelKey = "\(agent.rawValue):\(id)"
+                modelName = provider.model
+            } else {
+                modelName = latestCLIStatuses[agent]?.config.model
+            }
         } else {
             switch route {
             case .official:
@@ -1113,6 +1219,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             routeText = "  ·  \(route.displayName)"
         } else if agent == .hermes {
             routeText = "  ·  \(latestHermesStatus.modelConfig.model)"
+        } else if agent == .claude || agent == .openCode {
+            routeText = "  ·  \((latestCLIStatuses[agent] ?? .unavailable(agent)).config.model)"
         } else {
             routeText = ""
         }
@@ -1123,6 +1231,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             addCursorMenu(to: mainMenu)
         } else if agent == .hermes {
             addHermesMenu(to: mainMenu)
+        } else if agent == .claude || agent == .openCode {
+            addCLIAgentMenu(agent, to: mainMenu)
         } else {
             switch route {
             case let .provider(id):
@@ -1159,6 +1269,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             dashboardTitle = "打开 Cursor 用量页面"
         } else if agent == .hermes {
             dashboardTitle = HermesPreference.providerID == nil ? "打开 Hermes" : "打开提供商地址"
+        } else if agent == .claude || agent == .openCode {
+            dashboardTitle = CLIAgentPreference.providerID(for: agent) == nil
+                ? "打开 \(agent.displayName)"
+                : "打开提供商地址"
         } else {
             switch route {
             case .official: dashboardTitle = "打开官方用量页面"
@@ -1375,12 +1489,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func addCLIAgentMenu(_ agent: AgentKind, to menu: NSMenu) {
+        let status = latestCLIStatuses[agent] ?? .unavailable(agent)
+        menu.addItem(info(agent.displayName, emphasis: true))
+        menu.addItem(info("CLI  \(status.installed ? "已安装" : "未找到")"))
+        if let version = status.version, !version.isEmpty {
+            menu.addItem(info("版本  \(version)"))
+        }
+        if let id = CLIAgentPreference.providerID(for: agent),
+           let provider = ProviderStore.provider(id: id) {
+            menu.addItem(info("提供商  \(provider.name)", emphasis: true))
+            menu.addItem(info("模型  \(provider.model)"))
+            if let usage = latestCodeUsage {
+                menu.addItem(info("提供商余额  \(money(usage.balance))"))
+            } else if let balance = latestProviderBalance {
+                menu.addItem(info(balance.displayText))
+            }
+        } else {
+            menu.addItem(info("配置  \(status.config.provider)", emphasis: true))
+            menu.addItem(info("模型  \(status.config.model)"))
+        }
+        menu.addItem(.separator())
+        menu.addItem(info("任务状态监听  暂未启用"))
+    }
+
     private func startTaskActivityMonitor() {
         taskActivityMonitor?.stop()
         let monitor = TaskActivityMonitor(paths: [
             TaskActivityReader.defaultRootURL,
             CursorIntegration.supportDirectoryURL,
-            HermesIntegration.homeURL
+            HermesIntegration.homeURL,
+            ClaudeCodeIntegration.configURL.deletingLastPathComponent(),
+            OpenCodeIntegration.configURL.deletingLastPathComponent()
         ]) { [weak self] events in
             Task { @MainActor in
                 guard let self else { return }
@@ -1389,6 +1529,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 case .codex: root = TaskActivityReader.defaultRootURL
                 case .cursor: root = CursorIntegration.supportDirectoryURL
                 case .hermes: root = HermesIntegration.homeURL
+                case .claude: root = ClaudeCodeIntegration.configURL.deletingLastPathComponent()
+                case .openCode: root = OpenCodeIntegration.configURL.deletingLastPathComponent()
                 }
                 let normalizedRoot = root.standardizedFileURL.resolvingSymlinksInPath().path
                 let relevantEvents = events.filter { $0.path.hasPrefix(normalizedRoot) }
@@ -1414,6 +1556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switch selectedAgent {
             case .cursor: return CursorActivityReader.read()
             case .hermes: return HermesActivityReader.read()
+            case .claude, .openCode: return TaskActivitySnapshot(state: .ready, changedAt: nil)
             case .codex:
                 return TaskActivityReader.read(
                     fileEvents: fileEvents,
@@ -1541,6 +1684,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             return
         }
+        if agent == .claude || agent == .openCode {
+            if let id = CLIAgentPreference.providerID(for: agent),
+               let provider = ProviderStore.provider(id: id),
+               let url = URL(string: provider.baseURL) {
+                NSWorkspace.shared.open(url)
+            } else {
+                openSelectedAgent()
+            }
+            return
+        }
         switch route {
         case .official:
             NSWorkspace.shared.open(URL(string: "https://chatgpt.com/codex/settings/usage")!)
@@ -1567,6 +1720,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 } catch {
                     presentLaunchWarning(error.localizedDescription)
                 }
+            }
+        } else if agent == .claude {
+            do {
+                try ClaudeCodeIntegration.launch()
+            } catch {
+                presentLaunchWarning(error.localizedDescription)
+            }
+        } else if agent == .openCode {
+            do {
+                try OpenCodeIntegration.launch()
+            } catch {
+                presentLaunchWarning(error.localizedDescription)
             }
         } else {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: CodexLauncher.bundleIdentifier) else { return }

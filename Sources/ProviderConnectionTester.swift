@@ -33,13 +33,28 @@ enum ProviderConnectionTester {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 15
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        if profile.effectiveAPIFormat == .anthropicMessages {
+            request.setValue(key, forHTTPHeaderField: "x-api-key")
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        } else {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Agent-Pulse/\(AppUpdateChecker.currentVersion)", forHTTPHeaderField: "User-Agent")
 
-        let usesChatCompletions = profile.effectiveVendor == .zhipuAI
+        let usesAnthropic = profile.effectiveAPIFormat == .anthropicMessages
+        let usesChatCompletions = !usesAnthropic && (
+            profile.effectiveAPIFormat == .chatCompletions || profile.effectiveVendor == .zhipuAI
+        )
         let body: [String: Any]
-        if usesChatCompletions {
+        if usesAnthropic {
+            body = [
+                "model": profile.model,
+                "messages": [["role": "user", "content": "Reply with OK only."]],
+                "max_tokens": 16,
+                "stream": false
+            ]
+        } else if usesChatCompletions {
             body = [
                 "model": profile.model,
                 "messages": [["role": "user", "content": "Reply with OK only."]],
@@ -71,7 +86,9 @@ enum ProviderConnectionTester {
             throw ProviderConnectionError.invalidResponse
         }
         let duration = Date().timeIntervalSince(startedAt)
-        let protocolName = usesChatCompletions ? "智谱 OpenAI Chat Completions" : "Responses API"
+        let protocolName = usesAnthropic
+            ? "Anthropic Messages API"
+            : (usesChatCompletions ? "OpenAI Chat Completions" : "Responses API")
         return String(format: "连接成功 · %@ · %.1f 秒", protocolName, duration)
     }
 
@@ -133,7 +150,15 @@ enum ProviderConnectionTester {
 
     static func endpointURL(profile: ProviderProfile) throws -> URL {
         let base = profile.normalizedBaseURL
-        let suffix = profile.effectiveVendor == .zhipuAI ? "/chat/completions" : "/responses"
+        let suffix: String
+        switch profile.effectiveAPIFormat {
+        case .anthropicMessages:
+            suffix = base.lowercased().hasSuffix("/v1") ? "/messages" : "/v1/messages"
+        case .chatCompletions:
+            suffix = "/chat/completions"
+        case .automatic, .responses:
+            suffix = profile.effectiveVendor == .zhipuAI ? "/chat/completions" : "/responses"
+        }
         if base.lowercased().hasSuffix(suffix) {
             guard let url = URL(string: base) else { throw ProviderConnectionError.invalidURL }
             return url

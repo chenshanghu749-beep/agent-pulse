@@ -38,6 +38,8 @@ enum DiagnosticsCenter {
             provider = HermesPreference.providerID.flatMap { ProviderStore.provider(id: $0) }
         case .cursor:
             provider = CursorUsagePreference.providerID.flatMap { ProviderStore.provider(id: $0) }
+        case .claude, .openCode:
+            provider = CLIAgentPreference.providerID(for: agent).flatMap { ProviderStore.provider(id: $0) }
         }
 
         let config = (try? String(contentsOf: RouteConfigManager.configURL, encoding: .utf8)) ?? ""
@@ -78,6 +80,8 @@ enum DiagnosticsCenter {
         case .cursor: listenerText = CursorIntegration.hooksInstalled() ? "Hooks 已安装" : "Hooks 缺失或需要重装"
         case .hermes: listenerText = FileManager.default.fileExists(atPath: HermesIntegration.homeURL.path)
             ? "Hermes 本地状态目录可用" : "Hermes 本地状态目录不存在"
+        case .claude, .openCode:
+            listenerText = "已支持模型与提供商配置；任务状态监听暂未启用"
         }
 
         let eventDate = task.changedAt ?? activity.latestEventAt
@@ -117,6 +121,10 @@ enum DiagnosticsCenter {
         case .hermes:
             let model = HermesIntegration.readModelConfig().model
             return model == HermesModelConfig.unavailable.model ? nil : model
+        case .claude:
+            return ClaudeCodeIntegration.readStatus().config.model
+        case .openCode:
+            return OpenCodeIntegration.readStatus().config.model
         }
     }
 }

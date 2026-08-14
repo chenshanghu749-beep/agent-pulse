@@ -704,6 +704,9 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(AgentKind.codex.supportsModelProviderConfiguration)
     precondition(!AgentKind.cursor.supportsModelProviderConfiguration)
     precondition(!AgentKind.hermes.supportsModelProviderConfiguration)
+    precondition(!AgentKind.claude.supportsModelProviderConfiguration)
+    precondition(!AgentKind.openCode.supportsModelProviderConfiguration)
+    precondition(ProviderAPIFormat.allCases.contains(.anthropicMessages))
     for vendor in ProviderVendor.presetChoices where vendor != .custom {
         precondition(vendor.defaultBaseURL?.hasPrefix("https://") == true)
         precondition(vendor.defaultModel?.isEmpty == false)
@@ -723,6 +726,18 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(
         try! ProviderConnectionTester.endpointURL(profile: zhipuFixture).absoluteString
             == "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    )
+    let anthropicFixture = ProviderProfile(
+        id: "anthropic-fixture",
+        name: "Anthropic Proxy",
+        baseURL: "https://api.example.com",
+        model: "claude-sonnet",
+        apiFormat: .anthropicMessages,
+        agents: [.claude]
+    )
+    precondition(
+        try! ProviderConnectionTester.endpointURL(profile: anthropicFixture).absoluteString
+            == "https://api.example.com/v1/messages"
     )
     precondition(ProviderVendor.infer(from: "https://api.moonshot.cn/v1") == .moonshot)
     precondition(ProviderVendor.infer(from: "https://api.minimaxi.com/v1") == .miniMax)
@@ -1513,6 +1528,8 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(cursorTeamUsage.remainingPercent == 70)
 
     precondition(AgentKind.allCases.contains(.hermes))
+    precondition(AgentKind.allCases.contains(.claude))
+    precondition(AgentKind.allCases.contains(.openCode))
     let legacyAgentBinding = ProviderProfile(
         id: "legacy-agent-binding",
         name: "Legacy",
@@ -1522,6 +1539,8 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(legacyAgentBinding.supports(.codex))
     precondition(legacyAgentBinding.supports(.cursor))
     precondition(!legacyAgentBinding.supports(.hermes))
+    precondition(!legacyAgentBinding.supports(.claude))
+    precondition(!legacyAgentBinding.supports(.openCode))
     var emptyLegacyAgentBinding = legacyAgentBinding
     emptyLegacyAgentBinding.agents = []
     precondition(!emptyLegacyAgentBinding.supports(.hermes))

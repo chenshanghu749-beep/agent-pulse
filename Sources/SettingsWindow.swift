@@ -1110,7 +1110,7 @@ final class SettingsWindowController: NSWindowController {
         baseURLField.placeholderString = "https://api.example.com"
         modelField.placeholderString = "例如：gpt-5.6-sol"
         keyField.placeholderString = "sk-…"
-        protocolPopup.addItem(withTitle: ProviderAPIFormat.responses.displayName)
+        protocolPopup.addItems(withTitles: ProviderAPIFormat.allCases.map(\.displayName))
         protocolPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 250).isActive = true
         testProviderButton.target = self
         testProviderButton.action = #selector(testProviderConnection)
@@ -1632,6 +1632,8 @@ final class SettingsWindowController: NSWindowController {
                 applicationURL = CursorLauncher.applicationURL()
             case .hermes:
                 applicationURL = HermesLauncher.applicationURL()
+            case .claude, .openCode:
+                applicationURL = nil
             }
             if let applicationURL {
                 image = NSWorkspace.shared.icon(forFile: applicationURL.path)
@@ -1641,6 +1643,8 @@ final class SettingsWindowController: NSWindowController {
                 case .codex: symbol = "terminal.fill"
                 case .cursor: symbol = "cursorarrow.rays"
                 case .hermes: symbol = "sparkles"
+                case .claude: symbol = "command"
+                case .openCode: symbol = "chevron.left.forwardslash.chevron.right"
                 }
                 image = NSImage(
                     systemSymbolName: symbol,
@@ -1685,6 +1689,8 @@ final class SettingsWindowController: NSWindowController {
         case .codex: return "OpenAI 官方"
         case .cursor: return "Cursor 官方"
         case .hermes: return "Hermes 当前配置"
+        case .claude: return "Claude 当前配置"
+        case .openCode: return "OpenCode 当前配置"
         }
     }
 
@@ -1697,15 +1703,21 @@ final class SettingsWindowController: NSWindowController {
         case .hermes:
             let config = HermesIntegration.readModelConfig()
             return "\(config.provider) · \(config.model)"
+        case .claude:
+            let config = ClaudeCodeIntegration.readStatus().config
+            return "\(config.provider) · \(config.model)"
+        case .openCode:
+            let config = OpenCodeIntegration.readStatus().config
+            return "\(config.provider) · \(config.model)"
         }
     }
 
     private func balanceText(for provider: ProviderProfile?, agent: AgentKind) -> String {
         guard let provider else {
-            if agent == .hermes {
-                guard AgentPreference.selected == .hermes,
+            if agent == .hermes || agent == .claude || agent == .openCode {
+                guard AgentPreference.selected == agent,
                       let snapshot = appDelegate?.dashboardSnapshot() else { return "应用后读取" }
-                return snapshot.usageValue == "—" ? "Token —" : "Token \(snapshot.usageValue)"
+                return snapshot.usageValue == "—" ? "当前配置" : snapshot.usageValue
             }
             if agent == .cursor && AgentPreference.selected != .cursor {
                 return "应用后读取"
@@ -1729,7 +1741,7 @@ final class SettingsWindowController: NSWindowController {
             if key == "official" { return routeControl.selectedSegment == 0 }
             return routeControl.selectedSegment == 1 && selectedProviderID == key
         }
-        if agent == .hermes {
+        if agent == .hermes || agent == .claude || agent == .openCode {
             if key == "official" { return selectedProviderID == nil }
             return selectedProviderID == key
         }
@@ -1827,11 +1839,11 @@ final class SettingsWindowController: NSWindowController {
             statusLabel.stringValue = "Cursor 已使用官方连接；自定义模型请在 Cursor Models 中配置。"
             return
         }
-        if agent == .hermes {
+        if agent == .hermes || agent == .claude || agent == .openCode {
             selectedProviderID = sender.representsOfficial ? nil : sender.providerID
             reloadProviderPopups()
             reloadModelList()
-            statusLabel.stringValue = "已选择模型，点击“应用并打开”使配置生效；运行中的任务不会重启。"
+            statusLabel.stringValue = "已选择模型，点击“应用并打开”使配置生效。"
             return
         }
         if sender.representsOfficial {
@@ -1873,11 +1885,18 @@ final class SettingsWindowController: NSWindowController {
                         guard usage.isLoggedIn else { throw SettingsError.officialNotLoggedIn }
                     } else if agent == .cursor {
                         _ = try await CursorOfficialUsageClient.fetch()
-                    } else {
+                    } else if agent == .hermes {
                         let status = HermesIntegration.readStatus()
                         guard status.isInstalled, status.cliAvailable,
                               status.modelConfig != .unavailable else {
                             throw HermesIntegrationError.invalidConfiguration
+                        }
+                    } else {
+                        let status = agent == .claude
+                            ? ClaudeCodeIntegration.readStatus()
+                            : OpenCodeIntegration.readStatus()
+                        guard status.installed else {
+                            throw CLIAgentIntegrationError.cliNotFound(agent.displayName)
                         }
                     }
                     setModelTestPresentation(
@@ -2068,7 +2087,8 @@ final class SettingsWindowController: NSWindowController {
         let commonForm = makeEditorGrid([
             ("配置名", nameField),
             ("模型 ID", modelField),
-            ("API Key", keyField)
+            ("API Key", keyField),
+            ("API 格式", protocolPopup)
         ])
         nameField.widthAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
 
@@ -2856,6 +2876,13 @@ final class SettingsWindowController: NSWindowController {
                   let id = HermesPreference.providerID,
                   providers.contains(where: { $0.id == id && $0.supports(.hermes) }) {
             selectedProviderID = id
+        } else if selectedAgent == .claude || selectedAgent == .openCode {
+            let id = CLIAgentPreference.providerID(for: selectedAgent)
+            selectedProviderID = id.flatMap { candidate in
+                providers.contains(where: { $0.id == candidate && $0.supports(selectedAgent) })
+                    ? candidate
+                    : nil
+            }
         } else {
             selectedProviderID = nil
         }
@@ -3146,7 +3173,7 @@ final class SettingsWindowController: NSWindowController {
             ? appDelegate?.currentUsageObservation().flatMap {
                 $0.remainingPercent != nil ? .percentage : ($0.balance != nil ? .balance : nil)
             }
-            : .percentage
+            : (agent == .codex || agent == .cursor ? .percentage : nil)
         return AlertThresholdContext(
             modelKey: "\(agent.rawValue):official",
             title: "\(agent.displayName) · \(model)",
@@ -3506,6 +3533,13 @@ final class SettingsWindowController: NSWindowController {
             } else {
                 selectedProviderID = nil
             }
+        } else if agent == .claude || agent == .openCode {
+            let id = CLIAgentPreference.providerID(for: agent)
+            selectedProviderID = id.flatMap { candidate in
+                providers.contains(where: { $0.id == candidate && $0.supports(agent) })
+                    ? candidate
+                    : nil
+            }
         } else {
             cursorOfficialUsageSwitch.state = .on
             selectedProviderID = nil
@@ -3692,7 +3726,7 @@ final class SettingsWindowController: NSWindowController {
             baseURLField.stringValue = ""
             modelField.stringValue = ""
             keyField.stringValue = ""
-            protocolPopup.selectItem(at: 0)
+            protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: .responses) ?? 0)
             selectedVendor = .deepSeek
             updateVendorEditor(animated: false)
             return
@@ -3701,7 +3735,7 @@ final class SettingsWindowController: NSWindowController {
         baseURLField.stringValue = provider.baseURL
         modelField.stringValue = provider.model
         keyField.stringValue = CredentialStore.load(providerID: id) ?? ""
-        protocolPopup.selectItem(at: 0)
+        protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: provider.apiFormat ?? .automatic) ?? 0)
         selectedVendor = provider.effectiveVendor == .xAI ? .custom : provider.effectiveVendor
         updateVendorEditor(animated: false)
     }
@@ -3714,7 +3748,7 @@ final class SettingsWindowController: NSWindowController {
            let model = selectedVendor.defaultModel {
             baseURLField.stringValue = baseURL
             modelField.stringValue = model
-            protocolPopup.selectItem(at: 0)
+            protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: selectedVendor.defaultAPIFormat ?? .responses) ?? 0)
         } else if existing == nil {
             baseURLField.stringValue = ""
             modelField.stringValue = ""
@@ -3773,7 +3807,7 @@ final class SettingsWindowController: NSWindowController {
         baseURLField.stringValue = selectedVendor.defaultBaseURL ?? ""
         modelField.stringValue = selectedVendor.defaultModel ?? ""
         keyField.stringValue = ""
-        protocolPopup.selectItem(at: 0)
+        protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: selectedVendor.defaultAPIFormat ?? .responses) ?? 0)
         updateVendorEditor(animated: false)
         updateRouteFields()
         window?.makeFirstResponder(nameField)
@@ -3793,6 +3827,10 @@ final class SettingsWindowController: NSWindowController {
         }
         if HermesPreference.providerID == id {
             showError("Hermes 当前正在使用该提供商，请先切换到 Hermes 当前配置或其他模型。")
+            return
+        }
+        for agent in [AgentKind.claude, .openCode] where CLIAgentPreference.providerID(for: agent) == id {
+            showError("\(agent.displayName) 当前正在使用该提供商，请先切换到官方配置或其他模型。")
             return
         }
         let alert = NSAlert()
@@ -3927,7 +3965,9 @@ final class SettingsWindowController: NSWindowController {
             name: name,
             baseURL: baseURL,
             model: model,
-            apiFormat: .responses,
+            apiFormat: ProviderAPIFormat.allCases.indices.contains(protocolPopup.indexOfSelectedItem)
+                ? ProviderAPIFormat.allCases[protocolPopup.indexOfSelectedItem]
+                : .responses,
             agents: boundAgents,
             vendor: selectedVendor,
             balanceTeamID: nil
@@ -3955,6 +3995,10 @@ final class SettingsWindowController: NSWindowController {
         }
         if selectedAgent() == .hermes {
             confirmHermesSelection()
+            return
+        }
+        if selectedAgent() == .claude || selectedAgent() == .openCode {
+            confirmCLIAgentSelection(selectedAgent())
             return
         }
         confirmButton.isEnabled = false
@@ -4090,6 +4134,54 @@ final class SettingsWindowController: NSWindowController {
                 statusLabel.stringValue = "正在打开 Hermes…"
                 try await HermesLauncher.launch()
                 showSuccess("Hermes 已连接；新模型将在下一次请求中生效，运行中的任务保持不变。")
+                confirmButton.title = "连接成功"
+                window?.close()
+            } catch {
+                showError(error.localizedDescription)
+                confirmButton.isEnabled = true
+                updateConfirmButtonTitle()
+            }
+        }
+    }
+
+    private func confirmCLIAgentSelection(_ agent: AgentKind) {
+        confirmButton.isEnabled = false
+        confirmButton.title = "正在配置…"
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.stringValue = "正在更新 \(agent.displayName) 配置…"
+
+        Task {
+            do {
+                if let id = selectedProviderID {
+                    guard let profile = providers.first(where: {
+                        $0.id == id && $0.supports(agent)
+                    }) else { throw SettingsError.noProvider }
+                    guard CredentialStore.load(providerID: id)?.isEmpty == false else {
+                        throw SettingsError.missingCredential
+                    }
+                    if agent == .claude {
+                        try ClaudeCodeIntegration.apply(profile: profile)
+                    } else {
+                        try OpenCodeIntegration.apply(profile: profile)
+                    }
+                    CLIAgentPreference.setProviderID(id, for: agent)
+                } else {
+                    if agent == .claude {
+                        try ClaudeCodeIntegration.restoreOfficial()
+                    } else {
+                        try OpenCodeIntegration.restoreOfficial()
+                    }
+                    CLIAgentPreference.setProviderID(nil, for: agent)
+                }
+                AgentPreference.selected = agent
+                appDelegate?.agentDidChange(to: agent)
+                statusLabel.stringValue = "正在打开 \(agent.displayName)…"
+                if agent == .claude {
+                    try ClaudeCodeIntegration.launch()
+                } else {
+                    try OpenCodeIntegration.launch()
+                }
+                showSuccess("\(agent.displayName) 已连接；新配置将在下一次请求中生效。")
                 confirmButton.title = "连接成功"
                 window?.close()
             } catch {

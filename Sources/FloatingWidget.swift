@@ -110,6 +110,23 @@ enum AgentPulseWidgetStore {
                 primaryLabel = "当前 Agent"
                 detail = hermesStatus?.detail ?? "等待 Hermes 数据"
             }
+        } else if agent == .claude || agent == .openCode {
+            let provider = CLIAgentPreference.providerID(for: agent)
+                .flatMap { ProviderStore.provider(id: $0) }
+            routeName = "\(agent.displayName) · \(provider?.name ?? "当前配置")"
+            modelName = provider?.model ?? agent.displayName
+            if let codeUsage {
+                primaryValue = String(format: "$%.2f", codeUsage.balance)
+                primaryLabel = "提供商余额"
+                detail = "今日费用 $\(String(format: "%.2f", codeUsage.usage.today.actualCost))"
+                inputTokens = codeUsage.usage.today.inputTokens
+                outputTokens = codeUsage.usage.today.outputTokens
+                totalTokens = codeUsage.usage.today.totalTokens
+            } else {
+                primaryValue = provider?.model ?? agent.displayName
+                primaryLabel = "当前模型"
+                detail = provider?.baseURL ?? "CLI 配置已启用"
+            }
         } else {
             switch route {
             case let .provider(id):
