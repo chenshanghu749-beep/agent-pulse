@@ -107,6 +107,7 @@ private final class StatusBalanceOverlayView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func set(provider: String, value: String, animated: Bool) {
+        removeOrphanedRows()
         guard provider != currentProvider || value != currentValue || currentRow == nil else { return }
         currentProvider = provider
         currentValue = value
@@ -133,6 +134,22 @@ private final class StatusBalanceOverlayView: NSView {
             currentRow?.removeFromSuperview()
             self.currentRow = next
         }
+    }
+
+    func recoverFromInterruptedTransition() {
+        animationGeneration += 1
+        subviews.forEach { $0.removeFromSuperview() }
+        currentRow = nil
+        currentProvider = ""
+        currentValue = ""
+    }
+
+    private func removeOrphanedRows() {
+        guard let currentRow else {
+            subviews.forEach { $0.removeFromSuperview() }
+            return
+        }
+        subviews.filter { $0 !== currentRow }.forEach { $0.removeFromSuperview() }
     }
 
     override func layout() {
@@ -203,6 +220,18 @@ private final class StatusBalanceOverlayView: NSView {
     }
 }
 
+func statusBalanceOverlayRecoverySelfTest() {
+    let overlay = StatusBalanceOverlayView(frame: NSRect(x: 0, y: 0, width: 114, height: 22))
+    overlay.set(provider: "DeepSeek", value: "$166.32", animated: false)
+    precondition(overlay.subviews.count == 1)
+    overlay.addSubview(NSView(frame: overlay.bounds.offsetBy(dx: 0, dy: -overlay.bounds.height)))
+    precondition(overlay.subviews.count == 2)
+    overlay.recoverFromInterruptedTransition()
+    precondition(overlay.subviews.isEmpty)
+    overlay.set(provider: "DeepSeek", value: "$166.32", animated: false)
+    precondition(overlay.subviews.count == 1)
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private struct StatusRenderKey: Equatable {
@@ -262,6 +291,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusIconPlaceholderSize = NSSize.zero
     private var isUsingNativeStatusImage = false
     private var statusTitleText = ""
+    private var statusLayoutObservers: [NSObjectProtocol] = []
+    private var suppressBalanceAnimation = false
     private let iconAnimationStartUptime = ProcessInfo.processInfo.systemUptime
     private lazy var settings = SettingsWindowController(appDelegate: self)
 
@@ -306,6 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.autosaveName = "AgentPulseStatusItem"
         mainMenu.delegate = self
         configureStatusButton()
+        registerStatusLayoutObservers()
         startStartupChase()
         rebuildMainMenu()
 
@@ -428,6 +460,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         iconAnimationTimer?.invalidate()
         startupChaseTimer?.invalidate()
         balanceRotationTimer?.invalidate()
+        statusLayoutObservers.forEach {
+            NSWorkspace.shared.notificationCenter.removeObserver($0)
+            NotificationCenter.default.removeObserver($0)
+        }
+        statusLayoutObservers.removeAll()
+    }
+
+    private func registerStatusLayoutObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        let workspaceNotifications: [Notification.Name] = [
+            NSWorkspace.didWakeNotification,
+            NSWorkspace.screensDidWakeNotification,
+            NSWorkspace.sessionDidBecomeActiveNotification
+        ]
+        statusLayoutObservers = workspaceNotifications.map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.recoverStatusBarLayout()
+                }
+            }
+        }
+        statusLayoutObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.didChangeScreenParametersNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.recoverStatusBarLayout()
+                }
+            }
+        )
+    }
+
+    private func recoverStatusBarLayout() {
+        guard let button = statusItem?.button else { return }
+        statusBalanceOverlayView.recoverFromInterruptedTransition()
+        suppressBalanceAnimation = true
+        updateStatusTitle()
+        suppressBalanceAnimation = false
+        button.needsLayout = true
+        button.layoutSubtreeIfNeeded()
+        layoutStatusIconOverlay(in: button)
+        layoutStatusBalanceOverlay(in: button)
+        renderStatusButton()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+            guard let self, let button = self.statusItem?.button else { return }
+            self.statusItem.length = self.rotatingBalanceStatusItemWidth
+            button.needsLayout = true
+            button.layoutSubtreeIfNeeded()
+            self.layoutStatusIconOverlay(in: button)
+            self.layoutStatusBalanceOverlay(in: button)
+            self.renderStatusButton()
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -712,7 +798,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusBalanceOverlayView.set(
             provider: compactProviderName(entry.name),
             value: value,
-            animated: titleChanged && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            animated: titleChanged
+                && !suppressBalanceAnimation
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         )
         DispatchQueue.main.async { [weak self, weak button] in
             guard let self, let button else { return }

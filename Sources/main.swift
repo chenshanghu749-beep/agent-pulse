@@ -1125,6 +1125,7 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(StatusBalanceFormatter.twoDecimalDisplay("¥3.6") == "¥3.60")
     precondition(StatusBalanceFormatter.twoDecimalDisplay("82.4%") == "82.40%")
     precondition(StatusBalanceFormatter.twoDecimalDisplay("不可用") == "不可用")
+    statusBalanceOverlayRecoverySelfTest()
     let testApplication = NSApplication.shared
     let previousAppAppearance = testApplication.appearance
     testApplication.appearance = NSAppearance(named: .darkAqua)
