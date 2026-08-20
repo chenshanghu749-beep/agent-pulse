@@ -1293,31 +1293,12 @@ final class SettingsWindowController: NSWindowController {
         dashboardProviderBalanceStack.alignment = .leading
         dashboardProviderBalanceStack.distribution = .fill
         dashboardProviderBalanceStack.spacing = 12
-        let providerDocument = FlippedDocumentView()
-        providerDocument.translatesAutoresizingMaskIntoConstraints = false
-        dashboardProviderBalanceStack.translatesAutoresizingMaskIntoConstraints = false
-        providerDocument.addSubview(dashboardProviderBalanceStack)
-        let providerScroll = NSScrollView()
-        providerScroll.drawsBackground = false
-        providerScroll.borderType = .noBorder
-        providerScroll.hasVerticalScroller = true
-        providerScroll.autohidesScrollers = true
-        providerScroll.documentView = providerDocument
-        NSLayoutConstraint.activate([
-            providerScroll.heightAnchor.constraint(equalToConstant: 326),
-            providerDocument.widthAnchor.constraint(equalTo: providerScroll.contentView.widthAnchor),
-            providerDocument.heightAnchor.constraint(greaterThanOrEqualTo: providerScroll.contentView.heightAnchor),
-            dashboardProviderBalanceStack.leadingAnchor.constraint(equalTo: providerDocument.leadingAnchor),
-            dashboardProviderBalanceStack.trailingAnchor.constraint(equalTo: providerDocument.trailingAnchor),
-            dashboardProviderBalanceStack.topAnchor.constraint(equalTo: providerDocument.topAnchor),
-            dashboardProviderBalanceStack.bottomAnchor.constraint(lessThanOrEqualTo: providerDocument.bottomAnchor)
-        ])
-        let providerSection = NSStackView(views: [providerHeading, providerScroll])
+        let providerSection = NSStackView(views: [providerHeading, dashboardProviderBalanceStack])
         providerSection.orientation = .vertical
         providerSection.alignment = .leading
         providerSection.spacing = 12
         providerHeading.widthAnchor.constraint(equalTo: providerSection.widthAnchor).isActive = true
-        providerScroll.widthAnchor.constraint(equalTo: providerSection.widthAnchor).isActive = true
+        dashboardProviderBalanceStack.widthAnchor.constraint(equalTo: providerSection.widthAnchor).isActive = true
 
         return page(
             title: "仪表盘",
@@ -1361,14 +1342,17 @@ final class SettingsWindowController: NSWindowController {
                 name: "OpenAI 官方",
                 agent: .codex,
                 placeholder: "正在读取"
-            ),
-            makeDashboardOfficialBalanceCard(
+            )
+        ]
+        let cursorEntry = BalanceOverviewStore.entries().first { $0.id == "official:cursor" }
+        if shouldShowCursorOfficialBalance(cursorEntry) {
+            cards.append(makeDashboardOfficialBalanceCard(
                 id: "official:cursor",
                 name: "Cursor 官方",
                 agent: .cursor,
-                placeholder: CursorLauncher.applicationURL() == nil ? "未安装" : "正在读取"
-            )
-        ]
+                placeholder: "正在读取"
+            ))
+        }
         cards.append(contentsOf: providers.map(makeDashboardProviderBalanceCard))
 
         dashboardProviderSummaryLabel.stringValue = "\(cards.count) 个账户 · 每分钟同步"
@@ -1391,6 +1375,12 @@ final class SettingsWindowController: NSWindowController {
         }
         refreshDashboardOfficialBalances()
         refreshProviderBalances(providers, agent: selectedAgent())
+    }
+
+    private func shouldShowCursorOfficialBalance(_ entry: BalanceOverviewEntry?) -> Bool {
+        guard CursorLauncher.applicationURL() != nil, let entry else { return false }
+        let unavailable = ["", "—", "不可用", "未安装", "未登录", "正在读取"]
+        return !unavailable.contains(entry.value)
     }
 
     private func makeDashboardOfficialBalanceCard(
@@ -1562,7 +1552,7 @@ final class SettingsWindowController: NSWindowController {
     private func refreshCursorOfficialBalance() {
         let id = "official:cursor"
         guard CursorLauncher.applicationURL() != nil else {
-            storeDashboardOfficialBalance(id: id, name: "Cursor 官方", value: "未安装", detail: "未检测到 Cursor")
+            removeDashboardOfficialBalance(id: id)
             return
         }
         let now = Date()
@@ -1583,12 +1573,7 @@ final class SettingsWindowController: NSWindowController {
                     : (usage.displayMessage ?? "Cursor 官方用量")
                 storeDashboardOfficialBalance(id: id, name: "Cursor 官方", value: value, detail: detail)
             } catch {
-                storeDashboardOfficialBalance(
-                    id: id,
-                    name: "Cursor 官方",
-                    value: "不可用",
-                    detail: error.localizedDescription
-                )
+                removeDashboardOfficialBalance(id: id)
             }
         }
     }
@@ -1599,6 +1584,9 @@ final class SettingsWindowController: NSWindowController {
         value: String,
         detail: String
     ) {
+        let shouldReloadDashboard = window?.isVisible == true
+            && selectedSection == .dashboard
+            && dashboardProviderBalanceLabels[id] == nil
         dashboardOfficialBalanceUpdatedAt[id] = Date()
         dashboardProviderBalanceLabels[id]?.stringValue = value
         dashboardProviderBalanceLabels[id]?.toolTip = detail
@@ -1612,6 +1600,20 @@ final class SettingsWindowController: NSWindowController {
             updatedAt: Date()
         ))
         appDelegate?.balanceOverviewDidChange()
+        if shouldReloadDashboard {
+            reloadDashboardProviderBalances()
+        }
+    }
+
+    private func removeDashboardOfficialBalance(id: String) {
+        dashboardOfficialBalanceUpdatedAt[id] = Date()
+        BalanceOverviewStore.remove(id: id)
+        appDelegate?.balanceOverviewDidChange()
+        if window?.isVisible == true,
+           selectedSection == .dashboard,
+           dashboardProviderBalanceLabels[id] != nil {
+            reloadDashboardProviderBalances()
+        }
     }
 
     private func metricCell(

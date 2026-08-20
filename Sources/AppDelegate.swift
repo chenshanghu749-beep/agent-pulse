@@ -88,6 +88,121 @@ private final class StatusIconOverlayView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
+private final class StatusBalanceOverlayView: NSView {
+    static let fixedSize = NSSize(width: StatusBalanceLayout.balanceWidth, height: 22)
+
+    private var currentRow: NSView?
+    private var currentProvider = ""
+    private var currentValue = ""
+    private var animationGeneration = 0
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func set(provider: String, value: String, animated: Bool) {
+        guard provider != currentProvider || value != currentValue || currentRow == nil else { return }
+        currentProvider = provider
+        currentValue = value
+        animationGeneration += 1
+        let generation = animationGeneration
+        let next = makeRow(provider: provider, value: value)
+        next.frame = bounds
+        guard animated, let currentRow, window != nil else {
+            subviews.forEach { $0.removeFromSuperview() }
+            addSubview(next)
+            self.currentRow = next
+            return
+        }
+
+        next.frame.origin.y = -bounds.height
+        addSubview(next)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            currentRow.animator().frame = bounds.offsetBy(dx: 0, dy: bounds.height)
+            next.animator().frame = bounds
+        } completionHandler: { [weak self, weak currentRow, weak next] in
+            guard let self, generation == self.animationGeneration, let next else { return }
+            currentRow?.removeFromSuperview()
+            self.currentRow = next
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        if subviews.count == 1 { currentRow?.frame = bounds }
+    }
+
+    private func makeRow(provider: String, value: String) -> NSView {
+        let row = NSView(frame: bounds)
+        let providerFont = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        let displayProvider = compactProvider(
+            provider,
+            value: value,
+            providerFont: providerFont,
+            valueFont: valueFont
+        )
+        let text = NSMutableAttributedString(
+            string: displayProvider + " ",
+            attributes: [
+                .font: providerFont,
+                .foregroundColor: NSColor.labelColor
+            ]
+        )
+        text.append(NSAttributedString(
+            string: value,
+            attributes: [
+                .font: valueFont,
+                .foregroundColor: NSColor.labelColor
+            ]
+        ))
+        let label = NSTextField(labelWithAttributedString: text)
+        label.lineBreakMode = .byClipping
+        label.alignment = .left
+        label.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: StatusBalanceLayout.balanceWidth,
+            height: 18
+        )
+        row.addSubview(label)
+        return row
+    }
+
+    private func compactProvider(
+        _ provider: String,
+        value: String,
+        providerFont: NSFont,
+        valueFont: NSFont
+    ) -> String {
+        let valueWidth = ceil((value as NSString).size(withAttributes: [.font: valueFont]).width)
+        let spaceWidth = ceil((" " as NSString).size(withAttributes: [.font: providerFont]).width)
+        let available = max(14, StatusBalanceLayout.balanceWidth - valueWidth - spaceWidth)
+        let attributes: [NSAttributedString.Key: Any] = [.font: providerFont]
+        if (provider as NSString).size(withAttributes: attributes).width <= available {
+            return provider
+        }
+        let ellipsis = "..."
+        var candidate = provider
+        while !candidate.isEmpty {
+            candidate.removeLast()
+            let display = candidate + ellipsis
+            if (display as NSString).size(withAttributes: attributes).width <= available {
+                return display
+            }
+        }
+        return ellipsis
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private struct StatusRenderKey: Equatable {
@@ -143,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var iconAnimationFPS: Double = 0
     private var lastStatusRenderKey: StatusRenderKey?
     private weak var statusIconOverlayView: StatusIconOverlayView?
+    private let statusBalanceOverlayView = StatusBalanceOverlayView(frame: .zero)
     private var statusIconPlaceholderSize = NSSize.zero
     private var isUsingNativeStatusImage = false
     private var statusTitleText = ""
@@ -379,7 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func balanceOverviewDidChange() {
-        let count = BalanceOverviewStore.entries().count
+        let count = balanceEntriesForRotation().count
         if count > 0 { balanceRotationIndex %= count }
         else { balanceRotationIndex = 0 }
         updateStatusTitle()
@@ -432,6 +548,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         overlay.layer?.contentsScale = 2
         button.addSubview(overlay)
         statusIconOverlayView = overlay
+        statusBalanceOverlayView.isHidden = true
+        button.addSubview(statusBalanceOverlayView)
         updateStatusTitle()
         renderStatusButton()
     }
@@ -455,16 +573,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         balanceRotationTimer?.invalidate()
         balanceRotationTimer = nil
         guard StatusBalanceDisplayPreference.selected == .rotateAll else { return }
-        let timer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(
+            withTimeInterval: StatusBalanceLayout.rotationInterval,
+            repeats: true
+        ) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                let entries = BalanceOverviewStore.entries()
+                let entries = self.balanceEntriesForRotation()
                 guard !entries.isEmpty else { return }
                 self.balanceRotationIndex = (self.balanceRotationIndex + 1) % entries.count
                 self.updateStatusTitle()
             }
         }
-        timer.tolerance = 0.4
+        timer.tolerance = 0.5
         balanceRotationTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }
@@ -472,11 +593,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateStatusTitle() {
         guard let button = statusItem?.button else { return }
         if StatusBalanceDisplayPreference.selected == .rotateAll {
-            let entries = BalanceOverviewStore.entries()
+            let entries = balanceEntriesForRotation()
             if !entries.isEmpty {
                 let entry = entries[balanceRotationIndex % entries.count]
-                applyStatusTitle(
-                    "\(entry.name) · \(compact(entry.value))",
+                applyRotatingBalance(
+                    entry: entry,
+                    value: StatusBalanceFormatter.twoDecimalDisplay(entry.value),
                     toolTip: "Agent Pulse · \(entry.detail)",
                     to: button
                 )
@@ -563,11 +685,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
     }
 
-    private func applyStatusTitle(_ title: String, toolTip: String, to button: NSStatusBarButton) {
+    private func balanceEntriesForRotation() -> [BalanceOverviewEntry] {
+        BalanceOverviewStore.entries().filter { entry in
+            guard entry.id == "official:cursor" else { return true }
+            let unavailable = ["", "—", "不可用", "未安装", "未登录", "正在读取"]
+            return !unavailable.contains(entry.value)
+        }
+    }
+
+    private func applyRotatingBalance(
+        entry: BalanceOverviewEntry,
+        value: String,
+        toolTip: String,
+        to button: NSStatusBarButton
+    ) {
+        let title = "\(entry.name) · \(value)"
         let titleChanged = title != statusTitleText
-        if titleChanged { animateStatusTitleTransition(in: button) }
         statusTitleText = title
         button.toolTip = toolTip
+        button.setAccessibilityLabel(title)
+        button.alignment = .left
+        button.title = ""
+        statusItem.length = StatusBalanceLayout.statusItemWidth
+        statusBalanceOverlayView.isHidden = false
+        layoutStatusBalanceOverlay(in: button)
+        statusBalanceOverlayView.set(
+            provider: compactProviderName(entry.name),
+            value: value,
+            animated: titleChanged && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
+        DispatchQueue.main.async { [weak self, weak button] in
+            guard let self, let button else { return }
+            self.layoutStatusBalanceOverlay(in: button)
+        }
+        if titleChanged || statusIconStyle.usesCompositeStatusItemImage {
+            lastStatusRenderKey = nil
+            renderStatusButton()
+        }
+    }
+
+    private func applyStatusTitle(_ title: String, toolTip: String, to button: NSStatusBarButton) {
+        let titleChanged = title != statusTitleText
+        statusTitleText = title
+        button.toolTip = toolTip
+        button.setAccessibilityLabel(title)
+        statusBalanceOverlayView.isHidden = true
+        statusItem.length = NSStatusItem.variableLength
+        button.alignment = .center
         if statusIconStyle.usesCompositeStatusItemImage {
             button.title = ""
             if titleChanged {
@@ -579,16 +743,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func animateStatusTitleTransition(in button: NSStatusBarButton) {
-        guard StatusBalanceDisplayPreference.selected == .rotateAll,
-              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
-              let layer = button.layer else { return }
-        layer.removeAnimation(forKey: "AgentPulseBalanceCrossfade")
-        let transition = CATransition()
-        transition.type = .fade
-        transition.duration = 0.26
-        transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(transition, forKey: "AgentPulseBalanceCrossfade")
+    private func compactProviderName(_ value: String) -> String {
+        value.replacingOccurrences(of: " 官方", with: "")
     }
 
     private func compact(_ value: String) -> String {
@@ -680,6 +836,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func displayStatusImage(_ image: NSImage, in button: NSStatusBarButton) {
+        if StatusBalanceDisplayPreference.selected == .rotateAll {
+            button.title = ""
+            statusIconOverlayView?.isHidden = false
+            if isUsingNativeStatusImage || statusIconPlaceholderSize != image.size {
+                isUsingNativeStatusImage = false
+                statusIconPlaceholderSize = image.size
+                button.image = NSImage(size: image.size)
+                button.needsLayout = true
+                button.layoutSubtreeIfNeeded()
+            }
+            layoutStatusIconOverlay(in: button)
+            if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                statusIconOverlayView?.layer?.contents = cgImage
+            }
+            layoutStatusBalanceOverlay(in: button)
+            return
+        }
         if statusIconStyle.usesCompositeStatusItemImage {
             let composite = StatusIconRenderer.statusItemImage(
                 style: statusIconStyle,
@@ -694,6 +867,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusIconOverlayView?.isHidden = true
             button.title = ""
             button.image = composite
+            layoutStatusBalanceOverlay(in: button)
             return
         }
         button.title = statusTitleText
@@ -709,14 +883,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             statusIconOverlayView?.layer?.contents = cgImage
         }
+        layoutStatusBalanceOverlay(in: button)
     }
 
     private func layoutStatusIconOverlay(in button: NSStatusBarButton) {
         guard let overlay = statusIconOverlayView else { return }
         button.layoutSubtreeIfNeeded()
+        if StatusBalanceDisplayPreference.selected == .rotateAll {
+            let size = statusIconPlaceholderSize == .zero
+                ? NSSize(width: 18, height: 18)
+                : statusIconPlaceholderSize
+            overlay.frame = NSRect(
+                x: StatusBalanceLayout.statusIconX,
+                y: (button.bounds.height - size.height) / 2,
+                width: size.width,
+                height: size.height
+            )
+            return
+        }
         if let cell = button.cell as? NSButtonCell {
             overlay.frame = cell.imageRect(forBounds: button.bounds)
         }
+    }
+
+    private func layoutStatusBalanceOverlay(in button: NSStatusBarButton) {
+        guard !statusBalanceOverlayView.isHidden else { return }
+        button.layoutSubtreeIfNeeded()
+        statusBalanceOverlayView.frame = NSRect(
+            x: StatusBalanceLayout.balanceX,
+            y: (button.bounds.height - StatusBalanceOverlayView.fixedSize.height) / 2,
+            width: StatusBalanceOverlayView.fixedSize.width,
+            height: StatusBalanceOverlayView.fixedSize.height
+        )
     }
 
     private func syncIconAnimationTimer() {
@@ -744,6 +942,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func iconAnimationTick() {
         let elapsed = ProcessInfo.processInfo.systemUptime - iconAnimationStartUptime
         animationFrame = Int(elapsed * 60)
+        if StatusBalanceDisplayPreference.selected == .rotateAll {
+            renderStatusButton()
+            return
+        }
         if statusIconStyle.usesCompositeStatusItemImage,
            let button = statusItem?.button {
             button.image = StatusIconRenderer.statusItemImage(
@@ -754,6 +956,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 font: button.font ?? .systemFont(ofSize: 12, weight: .medium),
                 appearance: button.effectiveAppearance
             )
+            layoutStatusBalanceOverlay(in: button)
             return
         }
         renderStatusButton()

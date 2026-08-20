@@ -1102,6 +1102,17 @@ if CommandLine.arguments.contains("--login-status-test") {
         frame: 12
     ).size.width)
     precondition(compositeStatusImage.tiffRepresentation != nil)
+    precondition(StatusBalanceLayout.fitsStatusItem)
+    precondition(StatusBalanceLayout.balanceX - (
+        StatusBalanceLayout.statusIconX + 18
+    ) == 10)
+    precondition(StatusBalanceLayout.contentMaxX == 146)
+    precondition(StatusBalanceLayout.statusItemWidth - StatusBalanceLayout.contentMaxX == 8)
+    precondition(StatusBalanceLayout.rotationInterval == 5)
+    precondition(StatusBalanceFormatter.twoDecimalDisplay("$166.43") == "$166.43")
+    precondition(StatusBalanceFormatter.twoDecimalDisplay("¥3.6") == "¥3.60")
+    precondition(StatusBalanceFormatter.twoDecimalDisplay("82.4%") == "82.40%")
+    precondition(StatusBalanceFormatter.twoDecimalDisplay("不可用") == "不可用")
     let testApplication = NSApplication.shared
     let previousAppAppearance = testApplication.appearance
     testApplication.appearance = NSAppearance(named: .darkAqua)

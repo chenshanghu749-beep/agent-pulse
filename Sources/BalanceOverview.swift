@@ -1,5 +1,46 @@
 import Foundation
 
+enum StatusBalanceLayout {
+    static let statusItemWidth: CGFloat = 154
+    static let statusIconX: CGFloat = 4
+    static let statusIconSlotWidth: CGFloat = 28
+    static let balanceX: CGFloat = 32
+    static let balanceWidth: CGFloat = 114
+    static let rotationInterval: TimeInterval = 5
+    static let contentMaxX = balanceX + balanceWidth
+
+    static var fitsStatusItem: Bool {
+        statusIconX + statusIconSlotWidth <= balanceX
+            && contentMaxX <= statusItemWidth
+    }
+}
+
+enum StatusBalanceFormatter {
+    private static let pattern = try! NSRegularExpression(
+        pattern: #"^([¥￥$€£₽₩]?)([-+]?\d[\d,]*(?:\.\d+)?)(%?)$"#
+    )
+
+    static func twoDecimalDisplay(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+        guard let match = pattern.firstMatch(in: trimmed, range: range),
+              let numberRange = Range(match.range(at: 2), in: trimmed),
+              let number = Double(trimmed[numberRange].replacingOccurrences(of: ",", with: "")) else {
+            return value
+        }
+        let prefix = Range(match.range(at: 1), in: trimmed).map { String(trimmed[$0]) } ?? ""
+        let suffix = Range(match.range(at: 3), in: trimmed).map { String(trimmed[$0]) } ?? ""
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        formatter.usesGroupingSeparator = true
+        let formatted = formatter.string(from: NSNumber(value: number)) ?? String(format: "%.2f", number)
+        return prefix + formatted + suffix
+    }
+}
+
 struct BalanceOverviewEntry: Codable, Equatable, Sendable {
     let id: String
     let providerID: String?
@@ -29,6 +70,10 @@ enum BalanceOverviewStore {
 
     static func removeProvider(_ providerID: String) {
         save(entries().filter { $0.providerID != providerID })
+    }
+
+    static func remove(id: String) {
+        save(entries().filter { $0.id != id })
     }
 
     static func retainProviders(_ providerIDs: Set<String>) {
