@@ -562,11 +562,20 @@ if CommandLine.arguments.contains("--login-status-test") {
         exit(EXIT_FAILURE)
     }
 } else if CommandLine.arguments.contains("--pinwheel-preview")
-            || CommandLine.arguments.contains("--gears-preview") {
-    let previewStyle: StatusIconStyle = CommandLine.arguments.contains("--gears-preview")
-        ? .gears
-        : .pinwheel
-    let previewName = previewStyle == .gears ? "gears" : "pinwheel"
+            || CommandLine.arguments.contains("--gears-preview")
+            || CommandLine.arguments.contains("--bicycle-preview") {
+    let previewStyle: StatusIconStyle
+    let previewName: String
+    if CommandLine.arguments.contains("--gears-preview") {
+        previewStyle = .gears
+        previewName = "gears"
+    } else if CommandLine.arguments.contains("--bicycle-preview") {
+        previewStyle = .bicycle
+        previewName = "bicycle"
+    } else {
+        previewStyle = .pinwheel
+        previewName = "pinwheel"
+    }
     let scale: CGFloat = 8
     let cellSize = NSSize(width: 34 * scale, height: 24 * scale)
     let preview = NSImage(
@@ -579,7 +588,7 @@ if CommandLine.arguments.contains("--login-status-test") {
             let icon = StatusIconRenderer.image(
                 style: previewStyle,
                 active: signal,
-                frame: previewStyle == .gears ? index * 18 + 12 : index * 3
+                frame: previewStyle == .gears ? index * 18 + 12 : index * 8 + 6
             )
             let target = NSRect(
                 x: CGFloat(index) * cellSize.width + (cellSize.width - icon.size.width * scale) / 2,
@@ -1103,6 +1112,7 @@ if CommandLine.arguments.contains("--login-status-test") {
     ).size.width)
     precondition(compositeStatusImage.tiffRepresentation != nil)
     precondition(StatusBalanceLayout.fitsStatusItem)
+    precondition(StatusBalanceLayout.statusIconSlotWidth == 24)
     precondition(StatusBalanceLayout.balanceX - (
         StatusBalanceLayout.statusIconX + 18
     ) == 10)
@@ -1166,6 +1176,26 @@ if CommandLine.arguments.contains("--login-status-test") {
         frame: 18
     ).size.width)
     precondition(gearStatusImage.tiffRepresentation != nil)
+    precondition(StatusIconStyle.bicycle.usesCompositeStatusItemImage)
+    let bicycleRedPhase = StatusIconRenderer.animationPhase(style: .bicycle, active: .red, frame: 60)
+    let bicycleYellowPhase = StatusIconRenderer.animationPhase(style: .bicycle, active: .yellow, frame: 60)
+    let bicycleGreenPhase = StatusIconRenderer.animationPhase(style: .bicycle, active: .green, frame: 60)
+    precondition(bicycleRedPhase != bicycleYellowPhase)
+    precondition(bicycleYellowPhase != bicycleGreenPhase)
+    let bicycleStatusImage = StatusIconRenderer.statusItemImage(
+        style: .bicycle,
+        active: .red,
+        frame: 24,
+        title: "OpenAI 50.00%",
+        font: .systemFont(ofSize: 12, weight: .medium)
+    )
+    precondition(bicycleStatusImage.size.height == 18)
+    precondition(bicycleStatusImage.size.width > StatusIconRenderer.image(
+        style: .bicycle,
+        active: .red,
+        frame: 24
+    ).size.width)
+    precondition(bicycleStatusImage.tiffRepresentation != nil)
 
     let taskRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("agent-pulse-task-test-\(UUID().uuidString)", isDirectory: true)

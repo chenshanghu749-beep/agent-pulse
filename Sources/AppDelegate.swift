@@ -839,16 +839,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if StatusBalanceDisplayPreference.selected == .rotateAll {
             button.title = ""
             statusIconOverlayView?.isHidden = false
-            if isUsingNativeStatusImage || statusIconPlaceholderSize != image.size {
+            let fittedSize = fittedStatusIconSize(for: image.size)
+            if isUsingNativeStatusImage || statusIconPlaceholderSize != fittedSize {
                 isUsingNativeStatusImage = false
-                statusIconPlaceholderSize = image.size
-                button.image = NSImage(size: image.size)
+                statusIconPlaceholderSize = fittedSize
+                button.image = NSImage(size: fittedSize)
                 button.needsLayout = true
                 button.layoutSubtreeIfNeeded()
             }
             layoutStatusIconOverlay(in: button)
             if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
                 statusIconOverlayView?.layer?.contents = cgImage
+                statusIconOverlayView?.layer?.contentsGravity = .resizeAspect
             }
             layoutStatusBalanceOverlay(in: button)
             return
@@ -884,6 +886,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusIconOverlayView?.layer?.contents = cgImage
         }
         layoutStatusBalanceOverlay(in: button)
+    }
+
+    private func fittedStatusIconSize(for size: NSSize) -> NSSize {
+        guard size.width > 0, size.height > 0 else {
+            return NSSize(width: StatusBalanceLayout.statusIconSlotWidth, height: 18)
+        }
+        let scale = min(
+            StatusBalanceLayout.statusIconSlotWidth / size.width,
+            18 / size.height,
+            1
+        )
+        return NSSize(
+            width: floor(size.width * scale * 2) / 2,
+            height: floor(size.height * scale * 2) / 2
+        )
     }
 
     private func layoutStatusIconOverlay(in button: NSStatusBarButton) {

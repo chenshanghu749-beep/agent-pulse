@@ -3,7 +3,7 @@ import Foundation
 enum StatusBalanceLayout {
     static let statusItemWidth: CGFloat = 154
     static let statusIconX: CGFloat = 4
-    static let statusIconSlotWidth: CGFloat = 28
+    static let statusIconSlotWidth: CGFloat = 24
     static let balanceX: CGFloat = 32
     static let balanceWidth: CGFloat = 114
     static let rotationInterval: TimeInterval = 5

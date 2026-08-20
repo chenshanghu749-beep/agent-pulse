@@ -21,6 +21,7 @@ enum StatusIconStyle: String, CaseIterable {
     case trumpMascot
     case pinwheel
     case gears
+    case bicycle
     case statusRing
 
     var displayName: String {
@@ -31,12 +32,13 @@ enum StatusIconStyle: String, CaseIterable {
         case .trumpMascot: return "特朗普舞者"
         case .pinwheel: return "旋转风车"
         case .gears: return "旋转齿轮"
+        case .bicycle: return "骑行单车"
         case .statusRing: return "状态圆环"
         }
     }
 
     var usesCompositeStatusItemImage: Bool {
-        self == .pinwheel || self == .gears
+        self == .pinwheel || self == .gears || self == .bicycle
     }
 
     func animationFramesPerSecond(for signal: TrafficSignal) -> Double {
@@ -48,6 +50,12 @@ enum StatusIconStyle: String, CaseIterable {
             case .green: return 24
             }
         case .gears:
+            switch signal {
+            case .red: return 30
+            case .yellow: return 24
+            case .green: return 12
+            }
+        case .bicycle:
             switch signal {
             case .red: return 30
             case .yellow: return 24
@@ -117,6 +125,15 @@ enum StatusIconRenderer {
             }
             let phase = Int((Double(frame) * degreesPerSecond / 180).rounded(.down))
             return phase % 120
+        case .bicycle:
+            let revolutionsPerSecond: Double
+            switch active {
+            case .red: revolutionsPerSecond = 2.6
+            case .yellow: revolutionsPerSecond = 1.55
+            case .green: revolutionsPerSecond = 0.65
+            }
+            let phase = Int((Double(frame) * revolutionsPerSecond * 48 / 60).rounded(.down))
+            return phase % 48
         case .trafficLight, .lightBulb, .statusRing:
             return 0
         }
@@ -146,6 +163,7 @@ enum StatusIconRenderer {
             case .trumpMascot: renderedImage = trumpMascot(active: active, frame: phase)
             case .pinwheel: renderedImage = pinwheel(active: active, phase: phase, phaseCount: 72)
             case .gears: renderedImage = gears(active: active, phase: phase, phaseCount: 120)
+            case .bicycle: renderedImage = bicycle(active: active, phase: phase, phaseCount: 48)
             case .statusRing: renderedImage = statusRing(active: active)
             }
         }
@@ -829,6 +847,160 @@ enum StatusIconRenderer {
         NSColor.labelColor.withAlphaComponent(0.88).setStroke()
         hole.lineWidth = 0.8
         hole.stroke()
+    }
+
+    private static func bicycle(active: TrafficSignal, phase: Int, phaseCount: CGFloat) -> NSImage {
+        canvas(width: 32) { _ in
+            let ink = NSColor.labelColor.withAlphaComponent(0.96)
+            let rear = NSPoint(x: 6.8, y: 4.7)
+            let front = NSPoint(x: 25.4, y: 4.7)
+            let crank = NSPoint(x: 15.2, y: 5.4)
+            let seatPost = NSPoint(x: 12.3, y: 10.0)
+            let fork = NSPoint(x: 21.8, y: 10.2)
+            let handle = NSPoint(x: 24.2, y: 11.9)
+            let wheelRadius: CGFloat = 4.35
+            let pedalAngle = CGFloat(phase) / phaseCount * .pi * 2
+            let wheelAngle = pedalAngle * 0.72
+
+            if active == .red {
+                let airflow = NSBezierPath()
+                for y in [7.0, 9.0, 11.0] {
+                    airflow.move(to: NSPoint(x: 0.4, y: y))
+                    airflow.line(to: NSPoint(x: 4.0, y: y))
+                }
+                ink.setStroke()
+                airflow.lineWidth = 0.85
+                airflow.lineCapStyle = .round
+                airflow.lineJoinStyle = .round
+                airflow.stroke()
+            }
+
+            // Two strong wheels: fewer spokes keep the 18pt glyph readable.
+            ink.setStroke()
+            for center in [rear, front] {
+                let wheel = NSBezierPath(ovalIn: NSRect(
+                    x: center.x - wheelRadius,
+                    y: center.y - wheelRadius,
+                    width: wheelRadius * 2,
+                    height: wheelRadius * 2
+                ))
+                wheel.lineWidth = 1.45
+                wheel.stroke()
+
+                let spokes = NSBezierPath()
+                for spoke in 0..<3 {
+                    let spokeAngle = wheelAngle + CGFloat(spoke) * (.pi * 2 / 3)
+                    spokes.move(to: center)
+                    spokes.line(to: NSPoint(
+                        x: center.x + cos(spokeAngle) * (wheelRadius - 0.55),
+                        y: center.y + sin(spokeAngle) * (wheelRadius - 0.55)
+                    ))
+                }
+                spokes.lineWidth = 0.62
+                spokes.stroke()
+            }
+
+            // Compact road-bike frame.
+            let frame = NSBezierPath()
+            frame.move(to: rear)
+            frame.line(to: crank)
+            frame.line(to: seatPost)
+            frame.line(to: rear)
+            frame.move(to: seatPost)
+            frame.line(to: fork)
+            frame.line(to: crank)
+            frame.move(to: fork)
+            frame.line(to: front)
+            frame.line(to: handle)
+            frame.lineWidth = 1.35
+            frame.lineCapStyle = .round
+            frame.lineJoinStyle = .round
+            frame.stroke()
+
+            let saddle = NSBezierPath()
+            saddle.move(to: NSPoint(x: seatPost.x - 1.7, y: seatPost.y + 0.35))
+            saddle.line(to: NSPoint(x: seatPost.x + 1.1, y: seatPost.y + 0.35))
+            saddle.lineWidth = 1.55
+            saddle.lineCapStyle = .round
+            saddle.stroke()
+
+            // Rotating chainring and visible pedals.
+            let chainring = NSBezierPath(ovalIn: NSRect(
+                x: crank.x - 1.55,
+                y: crank.y - 1.55,
+                width: 3.1,
+                height: 3.1
+            ))
+            chainring.lineWidth = 0.85
+            chainring.stroke()
+            let pedalA = NSPoint(
+                x: crank.x + cos(pedalAngle) * 2.8,
+                y: crank.y + sin(pedalAngle) * 2.8
+            )
+            let pedalB = NSPoint(
+                x: crank.x - cos(pedalAngle) * 2.8,
+                y: crank.y - sin(pedalAngle) * 2.8
+            )
+            let crankArms = NSBezierPath()
+            crankArms.move(to: pedalA)
+            crankArms.line(to: pedalB)
+            crankArms.lineWidth = 0.95
+            crankArms.stroke()
+            for pedal in [pedalA, pedalB] {
+                let shoe = NSBezierPath(roundedRect: NSRect(
+                    x: pedal.x - 1.0,
+                    y: pedal.y - 0.35,
+                    width: 2.0,
+                    height: 0.7
+                ), xRadius: 0.35, yRadius: 0.35)
+                ink.setFill()
+                shoe.fill()
+            }
+
+            // Leaning rider with a visible alternating leg stroke.
+            let hip = NSPoint(x: 13.8, y: 12.7)
+            let shoulder = NSPoint(x: 17.9, y: 15.2)
+            let elbow = NSPoint(x: 21.7, y: 13.2)
+            let rider = NSBezierPath()
+            rider.move(to: hip)
+            rider.curve(
+                to: shoulder,
+                controlPoint1: NSPoint(x: 15.2, y: 12.8),
+                controlPoint2: NSPoint(x: 16.2, y: 14.7)
+            )
+            rider.line(to: elbow)
+            rider.line(to: handle)
+            rider.move(to: hip)
+            rider.curve(
+                to: pedalA,
+                controlPoint1: NSPoint(x: 15.6, y: 10.6),
+                controlPoint2: NSPoint(x: pedalA.x + 1.0, y: pedalA.y + 1.3)
+            )
+            rider.move(to: hip)
+            rider.curve(
+                to: pedalB,
+                controlPoint1: NSPoint(x: 11.9, y: 10.5),
+                controlPoint2: NSPoint(x: pedalB.x - 0.9, y: pedalB.y + 1.1)
+            )
+            rider.lineWidth = 1.55
+            rider.lineCapStyle = .round
+            rider.lineJoinStyle = .round
+            rider.stroke()
+
+            let head = NSBezierPath(ovalIn: NSRect(x: 17.0, y: 14.1, width: 3.9, height: 3.7))
+            ink.setFill()
+            head.fill()
+            let helmet = NSBezierPath()
+            helmet.move(to: NSPoint(x: 17.0, y: 16.6))
+            helmet.curve(
+                to: NSPoint(x: 20.8, y: 16.6),
+                controlPoint1: NSPoint(x: 17.6, y: 18.0),
+                controlPoint2: NSPoint(x: 20.0, y: 18.0)
+            )
+            helmet.lineWidth = 0.8
+            helmet.lineCapStyle = .round
+            helmet.stroke()
+        }
     }
 
     private static func statusRing(active: TrafficSignal) -> NSImage {
