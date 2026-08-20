@@ -9,18 +9,26 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.2.0-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.0-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-13%2B-111111">
 </p>
 
-Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor, and Hermes. It provides Agent selection, provider and model management, usage monitoring, and task status without modifying those apps.
+Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor, Hermes, Claude CLI, and OpenCode. It provides Agent selection, provider and model management, usage monitoring, and task status without modifying those apps.
 
 <p align="center">
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse menu bar preview" width="100%">
 </p>
+
+## What's New in 3.3.0
+
+- Added a two-column dashboard of official and third-party provider balance cards, showing provider-level account balances without model details and supporting direct add/delete actions for third-party profiles.
+- Upgraded the macOS desktop widget: the small widget shows the current provider balance, while the medium widget displays multiple account balances as compact cards.
+- Added Current Balance and Rotate All menu bar modes for official and third-party accounts, with a smooth crossfade that respects macOS Reduce Motion.
+- Added Claude CLI and OpenCode Agent support, including installation detection, launching, provider binding, model configuration, and Anthropic Messages API.
+- Provider balance caching now stays synchronized across the dashboard, model list, menu bar, and desktop widget while retaining the one-minute refresh interval.
 
 ## What's New in 3.2.0
 
@@ -40,13 +48,6 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
 - Refined the status appearance gallery, Agent selector, buttons, popup controls, and spacing between menu bar style icons and labels.
 - Configuration backups and usage history stay local, exclude Keychain API keys, and never modify Agent session databases.
 
-## What's New in 3.0.2
-
-- Fixed stale balances in the model configuration list; official usage and provider balances now stay synchronized with the menu bar.
-- Disabled automatic legacy-session migration at startup, preserved the existing `model_provider` during route changes, and kept the Codex session database read-only.
-- Added a Codex-only `model_provider` editor with automatic `config.toml` backups.
-- `Update Now` can quit the app, download and verify the installer in the background, install it, and reopen Agent Pulse automatically.
-
 ## Quick Install
 
 ```bash
@@ -59,10 +60,10 @@ Agent Pulse launches automatically after installation. The default location is `
 
 | Feature | Description |
 | --- | --- |
-| Agent selection | Select, monitor, and launch Codex, Cursor, or Hermes |
-| Route switching | Manage official configurations, presets, and custom providers for Codex and Hermes |
+| Agent selection | Select, monitor, and launch Codex, Cursor, Hermes, Claude CLI, or OpenCode |
+| Route switching | Manage official configurations, presets, and custom providers for supported Agents |
 | Provider presets | Includes DeepSeek, Zhipu AI, Moonshot, MiniMax, StepFun, MiMo, and Alibaba Model Studio, plus custom providers |
-| Usage dashboard | Review official usage, supported provider balances, and Hermes local tokens, requests, and costs |
+| Usage dashboard | Review official and provider balances in a two-column card layout synchronized with the menu bar and desktop widget |
 | Task status | Read Codex logs, Cursor Hooks, and Hermes Gateway state: red for execution, yellow for tools, and green for completion |
 | Monitoring and history | Set per-model alerts, check route health, review local trends, and export CSV |
 | Configuration security | Create local snapshots, preview diffs, restore, and import/export redacted settings |
@@ -74,7 +75,7 @@ Third-party routes connect directly through each provider's native Responses API
 
 ## Usage
 
-1. Open Agent Pulse and select `Codex`, `Cursor`, or `Hermes`.
+1. Open Agent Pulse and select `Codex`, `Cursor`, `Hermes`, `Claude CLI`, or `OpenCode`.
 2. Codex supports the official OpenAI route plus preset or custom providers with connection testing.
 3. Cursor keeps managing models and API keys in its own settings; Agent Pulse can display a selected provider balance.
 4. Hermes can keep its current configuration or use an Agent Pulse provider and model without restarting an active task.
@@ -90,7 +91,7 @@ The menu bar icon continuously reflects the current task status. A three-color t
 
 ## Manual Installation
 
-Download [`Agent-Pulse-3.2.0.dmg`](dist/Agent-Pulse-3.2.0.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
+Download [`Agent-Pulse-3.3.0.dmg`](dist/Agent-Pulse-3.3.0.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
 
 If macOS blocks the first launch, right-click the app in Finder and select `Open`.
 
@@ -104,7 +105,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.2.0.dmg`.
+The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.3.0.dmg`.
 
 ## Privacy and Security
 
@@ -130,4 +131,4 @@ If Agent Pulse is useful to you, you can support its ongoing maintenance through
   <img src="docs/assets/wechat-pay.jpg" alt="WeChat payment QR code" width="320">
 </p>
 
-Current version: `3.2.0`
+Current version: `3.3.0`

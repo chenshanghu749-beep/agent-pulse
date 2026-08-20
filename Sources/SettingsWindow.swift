@@ -740,6 +740,12 @@ final class SettingsWindowController: NSWindowController {
     private let dashboardVersionLabel = NSTextField(labelWithString: AppUpdateChecker.currentVersion)
     private let dashboardMessageLabel = NSTextField(wrappingLabelWithString: "运行状态正常")
     private let dashboardRefreshButton = TasteActionButton(title: "立即刷新", target: nil, action: nil)
+    private let dashboardAddProviderButton = TasteActionButton()
+    private let dashboardProviderBalanceStack = NSStackView()
+    private let dashboardProviderSummaryLabel = NSTextField(labelWithString: "尚未配置提供商")
+    private var dashboardProviderBalanceLabels: [String: NSTextField] = [:]
+    private var dashboardOfficialBalanceUpdatedAt: [String: Date] = [:]
+    private var dashboardOfficialBalanceRefreshesInFlight: Set<String> = []
     private let usageAlertSwitch = NSSwitch()
     private let alertThresholdControl = TasteValueStepper()
     private let alertContextLabel = NSTextField(wrappingLabelWithString: "尚未读取当前模型")
@@ -802,6 +808,12 @@ final class SettingsWindowController: NSWindowController {
     private let balanceCapabilityLabel = NSTextField(wrappingLabelWithString: "")
     private let themeControl = NSSegmentedControl(
         labels: AppTheme.allCases.map(\.displayName),
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private let statusBalanceModeControl = NSSegmentedControl(
+        labels: StatusBalanceDisplayMode.allCases.map(\.displayName),
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -1133,12 +1145,33 @@ final class SettingsWindowController: NSWindowController {
             themeControl.setWidth(112, forSegment: index)
         }
 
+        statusBalanceModeControl.target = self
+        statusBalanceModeControl.action = #selector(statusBalanceModeChanged)
+        statusBalanceModeControl.selectedSegment = StatusBalanceDisplayMode.allCases.firstIndex(
+            of: StatusBalanceDisplayPreference.selected
+        ) ?? 0
+        for index in StatusBalanceDisplayMode.allCases.indices {
+            statusBalanceModeControl.setWidth(108, forSegment: index)
+        }
+
         dashboardRefreshButton.target = self
         dashboardRefreshButton.action = #selector(refreshDashboardData)
         dashboardRefreshButton.role = .secondary
         dashboardRefreshButton.imageHugsTitle = true
         dashboardRefreshButton.imageScaling = .scaleProportionallyDown
         dashboardRefreshButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
+
+        dashboardAddProviderButton.image = NSImage(
+            systemSymbolName: "plus",
+            accessibilityDescription: "添加提供商"
+        )?.withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
+        dashboardAddProviderButton.toolTip = "添加提供商"
+        dashboardAddProviderButton.target = self
+        dashboardAddProviderButton.action = #selector(openAddProviderPage)
+        dashboardAddProviderButton.role = .primary
+        dashboardAddProviderButton.isBordered = false
+        dashboardAddProviderButton.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        dashboardAddProviderButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
         addProviderButton.image = NSImage(
             systemSymbolName: "plus",
@@ -1175,28 +1208,24 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private func buildDashboardPage() -> NSView {
-        let metricCells = [
-            metricCell(title: "当前 Agent", symbol: "terminal", value: dashboardAgentValue),
-            metricCell(title: "当前路由", symbol: "arrow.triangle.branch", value: dashboardRouteValue),
-            metricCell(
-                title: "任务状态",
-                symbol: "circle.fill",
-                value: dashboardTaskValue,
-                iconView: dashboardTaskIndicator
-            )
+        let metricCards = [
+            card([metricCell(title: "当前 Agent", symbol: "terminal", value: dashboardAgentValue)]),
+            card([metricCell(title: "当前路由", symbol: "arrow.triangle.branch", value: dashboardRouteValue)]),
+            card([
+                metricCell(
+                    title: "任务状态",
+                    symbol: "circle.fill",
+                    value: dashboardTaskValue,
+                    iconView: dashboardTaskIndicator
+                )
+            ])
         ]
-        let metrics = NSStackView(views: [
-            metricCells[0], verticalSeparator(),
-            metricCells[1], verticalSeparator(),
-            metricCells[2]
-        ])
+        let metrics = NSStackView(views: metricCards)
         metrics.orientation = .horizontal
         metrics.alignment = .centerY
-        metrics.spacing = 0
-        metricCells[0].widthAnchor.constraint(equalTo: metricCells[1].widthAnchor).isActive = true
-        metricCells[1].widthAnchor.constraint(equalTo: metricCells[2].widthAnchor).isActive = true
-        let metricsCard = card([padded(metrics, horizontal: 0, vertical: 0)])
-        metricsCard.heightAnchor.constraint(equalToConstant: 126).isActive = true
+        metrics.distribution = .fillEqually
+        metrics.spacing = 12
+        metricCards.forEach { $0.heightAnchor.constraint(equalToConstant: 116).isActive = true }
 
         dashboardUsageTitle.font = .systemFont(ofSize: 12, weight: .medium)
         dashboardUsageTitle.textColor = featureSecondaryColor()
@@ -1243,11 +1272,58 @@ final class SettingsWindowController: NSWindowController {
         dashboardRefreshButton.imageHugsTitle = true
         dashboardRefreshButton.imageScaling = .scaleProportionallyDown
 
+        dashboardProviderSummaryLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
+        dashboardProviderSummaryLabel.textColor = .secondaryLabelColor
+        dashboardProviderSummaryLabel.alignment = .right
+        dashboardProviderSummaryLabel.isSelectable = true
+        let providerHeading = NSStackView(views: [
+            sectionHeading(
+                title: "提供商余额",
+                detail: "统一查看官方账户与已配置提供商，不展示具体模型。"
+            ),
+            NSView(),
+            dashboardProviderSummaryLabel,
+            dashboardAddProviderButton
+        ])
+        providerHeading.orientation = .horizontal
+        providerHeading.alignment = .centerY
+        providerHeading.spacing = 16
+
+        dashboardProviderBalanceStack.orientation = .vertical
+        dashboardProviderBalanceStack.alignment = .leading
+        dashboardProviderBalanceStack.distribution = .fill
+        dashboardProviderBalanceStack.spacing = 12
+        let providerDocument = FlippedDocumentView()
+        providerDocument.translatesAutoresizingMaskIntoConstraints = false
+        dashboardProviderBalanceStack.translatesAutoresizingMaskIntoConstraints = false
+        providerDocument.addSubview(dashboardProviderBalanceStack)
+        let providerScroll = NSScrollView()
+        providerScroll.drawsBackground = false
+        providerScroll.borderType = .noBorder
+        providerScroll.hasVerticalScroller = true
+        providerScroll.autohidesScrollers = true
+        providerScroll.documentView = providerDocument
+        NSLayoutConstraint.activate([
+            providerScroll.heightAnchor.constraint(equalToConstant: 326),
+            providerDocument.widthAnchor.constraint(equalTo: providerScroll.contentView.widthAnchor),
+            providerDocument.heightAnchor.constraint(greaterThanOrEqualTo: providerScroll.contentView.heightAnchor),
+            dashboardProviderBalanceStack.leadingAnchor.constraint(equalTo: providerDocument.leadingAnchor),
+            dashboardProviderBalanceStack.trailingAnchor.constraint(equalTo: providerDocument.trailingAnchor),
+            dashboardProviderBalanceStack.topAnchor.constraint(equalTo: providerDocument.topAnchor),
+            dashboardProviderBalanceStack.bottomAnchor.constraint(lessThanOrEqualTo: providerDocument.bottomAnchor)
+        ])
+        let providerSection = NSStackView(views: [providerHeading, providerScroll])
+        providerSection.orientation = .vertical
+        providerSection.alignment = .leading
+        providerSection.spacing = 12
+        providerHeading.widthAnchor.constraint(equalTo: providerSection.widthAnchor).isActive = true
+        providerScroll.widthAnchor.constraint(equalTo: providerSection.widthAnchor).isActive = true
+
         return page(
             title: "仪表盘",
             subtitle: "在一个清晰的视图中掌握 Agent、路由、用量与任务进度。",
             cards: [
-                metricsCard,
+                metrics,
                 usageCard,
                 card([
                     settingRow(
@@ -1263,9 +1339,279 @@ final class SettingsWindowController: NSWindowController {
                         detail: "用量每分钟自动更新，也可以立即刷新。",
                         control: dashboardRefreshButton
                     )
-                ], interactive: true)
-            ]
+                ], interactive: true),
+                providerSection
+            ],
+            scrollable: true
         )
+    }
+
+    private func reloadDashboardProviderBalances() {
+        dashboardProviderBalanceStack.arrangedSubviews.forEach {
+            dashboardProviderBalanceStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        dashboardProviderBalanceLabels.removeAll(keepingCapacity: true)
+        providers = ProviderStore.providers()
+        BalanceOverviewStore.retainProviders(Set(providers.map(\.id)))
+
+        var cards: [NSView] = [
+            makeDashboardOfficialBalanceCard(
+                id: "official:openai",
+                name: "OpenAI 官方",
+                agent: .codex,
+                placeholder: "正在读取"
+            ),
+            makeDashboardOfficialBalanceCard(
+                id: "official:cursor",
+                name: "Cursor 官方",
+                agent: .cursor,
+                placeholder: CursorLauncher.applicationURL() == nil ? "未安装" : "正在读取"
+            )
+        ]
+        cards.append(contentsOf: providers.map(makeDashboardProviderBalanceCard))
+
+        dashboardProviderSummaryLabel.stringValue = "\(cards.count) 个账户 · 每分钟同步"
+        for index in stride(from: 0, to: cards.count, by: 2) {
+            var rowCards = [cards[index]]
+            if index + 1 < cards.count {
+                rowCards.append(cards[index + 1])
+            } else {
+                let placeholder = NSView()
+                placeholder.alphaValue = 0
+                rowCards.append(placeholder)
+            }
+            let row = NSStackView(views: rowCards)
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.distribution = .fillEqually
+            row.spacing = 12
+            dashboardProviderBalanceStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: dashboardProviderBalanceStack.widthAnchor).isActive = true
+        }
+        refreshDashboardOfficialBalances()
+        refreshProviderBalances(providers, agent: selectedAgent())
+    }
+
+    private func makeDashboardOfficialBalanceCard(
+        id: String,
+        name: String,
+        agent: AgentKind,
+        placeholder: String
+    ) -> NSView {
+        let cached = BalanceOverviewStore.entries().first { $0.id == id }
+        return makeDashboardBalanceCard(
+            id: id,
+            providerID: nil,
+            name: name,
+            detail: cached?.detail ?? "\(agent.displayName) 官方账户",
+            value: cached?.value ?? placeholder,
+            icon: routeIconView(provider: nil, agent: agent)
+        )
+    }
+
+    private func makeDashboardProviderBalanceCard(_ provider: ProviderProfile) -> NSView {
+        let text = dashboardBalanceText(for: provider)
+        let agentNames = provider.boundAgents
+            .sorted { $0.displayName < $1.displayName }
+            .map(\.displayName)
+            .joined(separator: " / ")
+        syncProviderBalanceOverview(provider, text: text, detail: nil)
+        return makeDashboardBalanceCard(
+            id: provider.id,
+            providerID: provider.id,
+            name: provider.name,
+            detail: "第三方提供商 · \(agentNames)",
+            value: dashboardDisplayValue(text),
+            icon: routeIconView(provider: provider, agent: .codex)
+        )
+    }
+
+    private func makeDashboardBalanceCard(
+        id: String,
+        providerID: String?,
+        name: String,
+        detail: String,
+        value: String,
+        icon: NSView
+    ) -> NSView {
+        let nameLabel = NSTextField(labelWithString: name)
+        nameLabel.font = displayFont(size: 13.5, weight: .semibold)
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.isSelectable = true
+        let detailLabel = NSTextField(labelWithString: detail)
+        detailLabel.font = .systemFont(ofSize: 10.5, weight: .regular)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.isSelectable = true
+        let identity = NSStackView(views: [nameLabel, detailLabel])
+        identity.orientation = .vertical
+        identity.alignment = .leading
+        identity.spacing = 4
+
+        var headingViews: [NSView] = [icon, identity, NSView()]
+        if let providerID {
+            let deleteButton = modelActionButton(
+                symbol: "trash",
+                toolTip: "删除提供商",
+                action: #selector(deleteDashboardProvider(_:)),
+                provider: providers.first { $0.id == providerID }
+            )
+            headingViews.append(deleteButton)
+        }
+        let heading = NSStackView(views: headingViews)
+        heading.orientation = .horizontal
+        heading.alignment = .centerY
+        heading.spacing = 11
+
+        let balance = NSTextField(labelWithString: value)
+        balance.font = .monospacedDigitSystemFont(ofSize: 22, weight: .bold)
+        balance.textColor = .labelColor
+        balance.lineBreakMode = .byTruncatingTail
+        balance.isSelectable = true
+        dashboardProviderBalanceLabels[id] = balance
+
+        let content = NSStackView(views: [heading, balance])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 13
+        heading.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        balance.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        let result = card([padded(content, horizontal: 17, vertical: 15)], interactive: true)
+        result.heightAnchor.constraint(equalToConstant: 126).isActive = true
+        return result
+    }
+
+    private func dashboardBalanceText(for provider: ProviderProfile) -> String {
+        if let cached = providerBalances[provider.id] { return cached }
+        guard provider.effectiveVendor.supportsBalanceLookup || provider.isCodeAPI else {
+            return "暂不支持查询"
+        }
+        guard CredentialStore.load(providerID: provider.id)?.isEmpty == false else {
+            return "未配置 API Key"
+        }
+        return provider.effectiveVendor == .zhipuAI || provider.effectiveVendor == .miniMax
+            ? "配额读取中"
+            : "余额读取中"
+    }
+
+    private func dashboardDisplayValue(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "余额 ", with: "")
+            .replacingOccurrences(of: "配额 ", with: "")
+    }
+
+    private func syncProviderBalanceOverview(
+        _ provider: ProviderProfile,
+        text: String,
+        detail: String?
+    ) {
+        BalanceOverviewStore.upsert(BalanceOverviewEntry(
+            id: "provider:\(provider.id)",
+            providerID: provider.id,
+            name: provider.name,
+            value: dashboardDisplayValue(text),
+            detail: detail ?? "第三方提供商",
+            isOfficial: false,
+            updatedAt: Date()
+        ))
+    }
+
+    private func refreshDashboardOfficialBalances() {
+        refreshOpenAIOfficialBalance()
+        refreshCursorOfficialBalance()
+    }
+
+    private func refreshOpenAIOfficialBalance() {
+        let id = "official:openai"
+        let now = Date()
+        guard !dashboardOfficialBalanceRefreshesInFlight.contains(id),
+              ProviderBalanceRefreshPolicy.shouldRefresh(
+                lastUpdated: dashboardOfficialBalanceUpdatedAt[id],
+                now: now
+              ) else { return }
+        dashboardOfficialBalanceRefreshesInFlight.insert(id)
+        Task {
+            defer { dashboardOfficialBalanceRefreshesInFlight.remove(id) }
+            do {
+                let usage = try await OfficialUsageClient.fetch()
+                let value: String
+                let detail: String
+                if !usage.isLoggedIn {
+                    value = "未登录"
+                    detail = "OpenAI 官方账户"
+                } else if let primary = usage.primary {
+                    value = String(format: "%.0f%%", primary.remainingPercent)
+                    detail = "\(primary.label)剩余 · \(usage.planType ?? "ChatGPT")"
+                } else {
+                    value = "—"
+                    detail = usage.email ?? "官方用量暂不可用"
+                }
+                storeDashboardOfficialBalance(id: id, name: "OpenAI 官方", value: value, detail: detail)
+            } catch {
+                storeDashboardOfficialBalance(
+                    id: id,
+                    name: "OpenAI 官方",
+                    value: "不可用",
+                    detail: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func refreshCursorOfficialBalance() {
+        let id = "official:cursor"
+        guard CursorLauncher.applicationURL() != nil else {
+            storeDashboardOfficialBalance(id: id, name: "Cursor 官方", value: "未安装", detail: "未检测到 Cursor")
+            return
+        }
+        let now = Date()
+        guard !dashboardOfficialBalanceRefreshesInFlight.contains(id),
+              ProviderBalanceRefreshPolicy.shouldRefresh(
+                lastUpdated: dashboardOfficialBalanceUpdatedAt[id],
+                now: now
+              ) else { return }
+        dashboardOfficialBalanceRefreshesInFlight.insert(id)
+        Task {
+            defer { dashboardOfficialBalanceRefreshesInFlight.remove(id) }
+            do {
+                let usage = try await CursorOfficialUsageClient.fetch()
+                let value = usage.compactUsageText
+                    ?? String(format: "$%.2f", Double(usage.remainingCents) / 100)
+                let detail = usage.limitCents > 0
+                    ? String(format: "账期已用 $%.2f", Double(usage.usedCents) / 100)
+                    : (usage.displayMessage ?? "Cursor 官方用量")
+                storeDashboardOfficialBalance(id: id, name: "Cursor 官方", value: value, detail: detail)
+            } catch {
+                storeDashboardOfficialBalance(
+                    id: id,
+                    name: "Cursor 官方",
+                    value: "不可用",
+                    detail: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func storeDashboardOfficialBalance(
+        id: String,
+        name: String,
+        value: String,
+        detail: String
+    ) {
+        dashboardOfficialBalanceUpdatedAt[id] = Date()
+        dashboardProviderBalanceLabels[id]?.stringValue = value
+        dashboardProviderBalanceLabels[id]?.toolTip = detail
+        BalanceOverviewStore.upsert(BalanceOverviewEntry(
+            id: id,
+            providerID: nil,
+            name: name,
+            value: value,
+            detail: detail,
+            isOfficial: true,
+            updatedAt: Date()
+        ))
+        appDelegate?.balanceOverviewDidChange()
     }
 
     private func metricCell(
@@ -1810,6 +2156,13 @@ final class SettingsWindowController: NSWindowController {
     ) {
         providerBalances[providerID] = text
         providerBalanceUpdatedAt[providerID] = Date()
+        dashboardProviderBalanceLabels[providerID]?.stringValue = text
+        dashboardProviderBalanceLabels[providerID]?.toolTip = toolTip
+        if let provider = ProviderStore.provider(id: providerID) {
+            dashboardProviderBalanceLabels[providerID]?.stringValue = dashboardDisplayValue(text)
+            syncProviderBalanceOverview(provider, text: text, detail: toolTip)
+            appDelegate?.balanceOverviewDidChange()
+        }
         guard expectedAgent == nil || selectedAgent() == expectedAgent else { return }
         providerBalanceLabels[providerID]?.stringValue = text
         providerBalanceLabels[providerID]?.toolTip = toolTip
@@ -1824,7 +2177,12 @@ final class SettingsWindowController: NSWindowController {
     }
 
     func refreshBalanceDisplaysIfVisible() {
-        guard window?.isVisible == true, selectedSection == .route else { return }
+        guard window?.isVisible == true else { return }
+        if selectedSection == .dashboard {
+            reloadDashboardProviderBalances()
+            return
+        }
+        guard selectedSection == .route else { return }
         let agent = selectedAgent()
         officialBalanceLabel?.stringValue = balanceText(for: nil, agent: agent)
         refreshProviderBalances(providers.filter { $0.supports(agent) }, agent: agent)
@@ -2440,6 +2798,11 @@ final class SettingsWindowController: NSWindowController {
             detail: "选择跟随系统、浅色或深色，切换后立即生效。",
             control: themeControl
         )
+        let balanceModeRow = settingRow(
+            title: "菜单栏余额",
+            detail: "显示当前 Agent 的余额，或每 4 秒轮播全部官方与第三方提供商。",
+            control: statusBalanceModeControl
+        )
 
         statusStyleButtons.removeAll(keepingCapacity: true)
         let buttons = StatusIconStyle.allCases.map(makeStatusStyleButton)
@@ -2482,7 +2845,7 @@ final class SettingsWindowController: NSWindowController {
             title: "状态与外观",
             subtitle: "调整界面主题与菜单栏状态反馈。",
             cards: [
-                card([themeRow], interactive: true),
+                card([themeRow, separator(), balanceModeRow], interactive: true),
                 card([styleHeading, separator(), styleGallery], interactive: true),
                 card([padded(legend, horizontal: 18, vertical: 12)])
             ]
@@ -2598,7 +2961,8 @@ final class SettingsWindowController: NSWindowController {
         title: String,
         subtitle: String,
         headerAccessory: NSView? = nil,
-        cards: [NSView]
+        cards: [NSView],
+        scrollable: Bool = false
     ) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = displayFont(size: 30, weight: .bold)
@@ -2623,7 +2987,7 @@ final class SettingsWindowController: NSWindowController {
         stack.distribution = .fill
         stack.spacing = 18
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let view = NSView()
+        let view: NSView = scrollable ? FlippedDocumentView() : NSView()
         view.addSubview(stack)
         ([headerRow] + cards).forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         NSLayoutConstraint.activate([
@@ -2632,7 +2996,19 @@ final class SettingsWindowController: NSWindowController {
             stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 48),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20)
         ])
-        return view
+        guard scrollable else { return view }
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = view
+        view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            view.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor)
+        ])
+        return scroll
     }
 
     private func card(_ rows: [NSView], interactive: Bool = false) -> NSView {
@@ -2788,7 +3164,7 @@ final class SettingsWindowController: NSWindowController {
         let selectedColor = NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white : .black
         }
-        [agentControl, routeControl, themeControl].forEach { control in
+        [agentControl, routeControl, themeControl, statusBalanceModeControl].forEach { control in
             control.segmentStyle = .rounded
             control.selectedSegmentBezelColor = selectedColor
         }
@@ -2908,6 +3284,7 @@ final class SettingsWindowController: NSWindowController {
         showWindow(nil)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
+        refreshDashboard()
     }
 
     func presentProviderPreview() {
@@ -3007,11 +3384,17 @@ final class SettingsWindowController: NSWindowController {
             dashboardMessageLabel.stringValue = "Agent Pulse 运行正常"
             dashboardMessageLabel.textColor = .secondaryLabelColor
         }
+        if window?.isVisible == true, selectedSection == .dashboard {
+            reloadDashboardProviderBalances()
+        }
     }
 
     @objc private func refreshDashboardData() {
         dashboardRefreshButton.isEnabled = false
         dashboardRefreshButton.title = "正在刷新…"
+        providerBalanceUpdatedAt.removeAll(keepingCapacity: true)
+        dashboardOfficialBalanceUpdatedAt.removeAll(keepingCapacity: true)
+        reloadDashboardProviderBalances()
         Task {
             await appDelegate?.refreshDashboardData()
             refreshDashboard()
@@ -3594,12 +3977,26 @@ final class SettingsWindowController: NSWindowController {
         showSuccess("已切换为\(theme.displayName)主题。")
     }
 
+    @objc private func statusBalanceModeChanged() {
+        let index = statusBalanceModeControl.selectedSegment
+        guard StatusBalanceDisplayMode.allCases.indices.contains(index) else { return }
+        let mode = StatusBalanceDisplayMode.allCases[index]
+        StatusBalanceDisplayPreference.selected = mode
+        appDelegate?.statusBalanceDisplayModeDidChange(to: mode)
+        showSuccess("菜单栏已切换为\(mode.displayName)。")
+    }
+
     private func updateAppearanceSelectionStates() {
         for (style, button) in statusStyleButtons {
             button.setChoiceSelected(style == StatusIconPreference.selected)
         }
         if let index = AppTheme.allCases.firstIndex(of: AppThemePreference.selected) {
             themeControl.selectedSegment = index
+        }
+        if let index = StatusBalanceDisplayMode.allCases.firstIndex(
+            of: StatusBalanceDisplayPreference.selected
+        ) {
+            statusBalanceModeControl.selectedSegment = index
         }
     }
 
@@ -3815,6 +4212,15 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func deleteProvider() {
         guard let id = selectedProviderID else { return }
+        performDeleteProvider(id: id, returnTo: .route)
+    }
+
+    @objc private func deleteDashboardProvider(_ sender: ProviderActionButton) {
+        guard let id = sender.providerID else { return }
+        performDeleteProvider(id: id, returnTo: .dashboard)
+    }
+
+    private func performDeleteProvider(id: String, returnTo section: Section) {
         guard let index = providers.firstIndex(where: { $0.id == id }) else {
             selectedProviderID = providers.first?.id
             reloadProviderPopups()
@@ -3848,6 +4254,7 @@ final class SettingsWindowController: NSWindowController {
             providerBalances.removeValue(forKey: id)
             providerBalanceUpdatedAt.removeValue(forKey: id)
             providerBalanceRefreshesInFlight.remove(id)
+            BalanceOverviewStore.removeProvider(id)
             selectedProviderID = nil
             if CursorUsagePreference.providerID == id {
                 CursorUsagePreference.providerID = nil
@@ -3856,7 +4263,8 @@ final class SettingsWindowController: NSWindowController {
             reloadProviderPopups()
             reloadModelList()
             showSuccess("已删除提供商。")
-            selectSection(.route)
+            selectSection(section)
+            appDelegate?.balanceOverviewDidChange()
         } catch {
             showError(error.localizedDescription)
         }

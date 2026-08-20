@@ -1,6 +1,13 @@
 import Foundation
 import WidgetKit
 
+struct AgentPulseWidgetBalanceItem: Codable {
+    let name: String
+    let value: String
+    let detail: String
+    let isOfficial: Bool
+}
+
 struct AgentPulseWidgetData: Codable {
     let updatedAt: Date
     let routeName: String
@@ -13,6 +20,7 @@ struct AgentPulseWidgetData: Codable {
     let totalTokens: Int?
     let taskText: String
     let taskColor: String
+    let balances: [AgentPulseWidgetBalanceItem]?
 
     static let placeholder = AgentPulseWidgetData(
         updatedAt: Date(),
@@ -25,7 +33,15 @@ struct AgentPulseWidgetData: Codable {
         outputTokens: nil,
         totalTokens: nil,
         taskText: "可以继续对话",
-        taskColor: "green"
+        taskColor: "green",
+        balances: [
+            AgentPulseWidgetBalanceItem(
+                name: "OpenAI 官方",
+                value: "82%",
+                detail: "5 小时剩余",
+                isOfficial: true
+            )
+        ]
     )
 }
 
@@ -50,7 +66,8 @@ enum AgentPulseWidgetStore {
         cursorProviderUsage: UsageResponse?,
         hermesStatus: HermesStatus?,
         hermesUsage: HermesUsageSnapshot?,
-        task: TaskActivitySnapshot
+        task: TaskActivitySnapshot,
+        balances: [BalanceOverviewEntry]
     ) {
         var routeName = "Codex · \(route.displayName)"
         var modelName = "Codex"
@@ -183,7 +200,15 @@ enum AgentPulseWidgetStore {
             updatedAt: Date(), routeName: routeName, modelName: modelName,
             primaryValue: primaryValue, primaryLabel: primaryLabel, detail: detail,
             inputTokens: inputTokens, outputTokens: outputTokens, totalTokens: totalTokens,
-            taskText: taskText, taskColor: taskColor
+            taskText: taskText, taskColor: taskColor,
+            balances: balances.map {
+                AgentPulseWidgetBalanceItem(
+                    name: $0.name,
+                    value: $0.value,
+                    detail: $0.detail,
+                    isOfficial: $0.isOfficial
+                )
+            }
         )
         guard let data = try? JSONEncoder().encode(value) else { return }
         let directory = dataURL.deletingLastPathComponent()

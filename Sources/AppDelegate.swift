@@ -107,6 +107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var usageTimer: Timer?
     private var taskTimer: Timer?
+    private var balanceRotationTimer: Timer?
+    private var balanceRotationIndex = 0
     private var taskActivityMonitor: TaskActivityMonitor?
     private var taskMonitorActive = false
     private var iconAnimationTimer: Timer?
@@ -203,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         [usageTimer, taskTimer].compactMap { $0 }.forEach {
             RunLoop.main.add($0, forMode: .common)
         }
+        configureBalanceRotationTimer()
 
         updateWidget()
         Task {
@@ -308,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         taskActivityMonitor?.stop()
         iconAnimationTimer?.invalidate()
         startupChaseTimer?.invalidate()
+        balanceRotationTimer?.invalidate()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -365,6 +369,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastStatusRenderKey = nil
         renderStatusButton()
         rebuildMainMenu()
+    }
+
+    func statusBalanceDisplayModeDidChange(to mode: StatusBalanceDisplayMode) {
+        StatusBalanceDisplayPreference.selected = mode
+        balanceRotationIndex = 0
+        configureBalanceRotationTimer()
+        updateStatusTitle()
+    }
+
+    func balanceOverviewDidChange() {
+        let count = BalanceOverviewStore.entries().count
+        if count > 0 { balanceRotationIndex %= count }
+        else { balanceRotationIndex = 0 }
+        updateStatusTitle()
+        updateWidget()
     }
 
     func cursorHooksDidRestart() {
@@ -432,8 +451,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY - 3), in: button)
     }
 
+    private func configureBalanceRotationTimer() {
+        balanceRotationTimer?.invalidate()
+        balanceRotationTimer = nil
+        guard StatusBalanceDisplayPreference.selected == .rotateAll else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let entries = BalanceOverviewStore.entries()
+                guard !entries.isEmpty else { return }
+                self.balanceRotationIndex = (self.balanceRotationIndex + 1) % entries.count
+                self.updateStatusTitle()
+            }
+        }
+        timer.tolerance = 0.4
+        balanceRotationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
     private func updateStatusTitle() {
         guard let button = statusItem?.button else { return }
+        if StatusBalanceDisplayPreference.selected == .rotateAll {
+            let entries = BalanceOverviewStore.entries()
+            if !entries.isEmpty {
+                let entry = entries[balanceRotationIndex % entries.count]
+                applyStatusTitle(
+                    "\(entry.name) · \(compact(entry.value))",
+                    toolTip: "Agent Pulse · \(entry.detail)",
+                    to: button
+                )
+                return
+            }
+        }
         if agent == .cursor {
             var parts = ["Cursor"]
             if let usage = latestCursorOfficialUsage {
@@ -516,6 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applyStatusTitle(_ title: String, toolTip: String, to button: NSStatusBarButton) {
         let titleChanged = title != statusTitleText
+        if titleChanged { animateStatusTitleTransition(in: button) }
         statusTitleText = title
         button.toolTip = toolTip
         if statusIconStyle.usesCompositeStatusItemImage {
@@ -527,6 +577,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             button.title = title
         }
+    }
+
+    private func animateStatusTitleTransition(in button: NSStatusBarButton) {
+        guard StatusBalanceDisplayPreference.selected == .rotateAll,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let layer = button.layer else { return }
+        layer.removeAnimation(forKey: "AgentPulseBalanceCrossfade")
+        let transition = CATransition()
+        transition.type = .fade
+        transition.duration = 0.26
+        transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(transition, forKey: "AgentPulseBalanceCrossfade")
     }
 
     private func compact(_ value: String) -> String {
@@ -1645,8 +1707,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             cursorProviderUsage: latestCursorProviderUsage,
             hermesStatus: latestHermesStatus,
             hermesUsage: latestHermesUsage,
-            task: taskSnapshot
+            task: taskSnapshot,
+            balances: widgetBalanceEntries()
         )
+    }
+
+    private func widgetBalanceEntries() -> [BalanceOverviewEntry] {
+        let entries = BalanceOverviewStore.entries()
+        let preferredID: String?
+        if agent == .cursor {
+            preferredID = "official:cursor"
+        } else if agent == .hermes {
+            preferredID = HermesPreference.providerID.map { "provider:\($0)" }
+        } else if agent == .claude || agent == .openCode {
+            preferredID = CLIAgentPreference.providerID(for: agent).map { "provider:\($0)" }
+        } else {
+            switch route {
+            case .official: preferredID = "official:openai"
+            case let .provider(id): preferredID = "provider:\(id)"
+            }
+        }
+        guard let preferredID,
+              let preferred = entries.first(where: { $0.id == preferredID }) else {
+            return entries
+        }
+        return [preferred] + entries.filter { $0.id != preferredID }
     }
 
     private func info(_ title: String, emphasis: Bool = false) -> NSMenuItem {

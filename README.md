@@ -9,14 +9,14 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.2.0-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.0-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-13%2B-111111">
 </p>
 
-Agent Pulse 是面向 Codex、Cursor 与 Hermes 的原生 macOS 菜单栏路由与状态工具。它提供 Agent 切换、模型与提供商管理、用量展示和任务状态，无需修改这些 Agent 应用本体。
+Agent Pulse 是面向 Codex、Cursor、Hermes、Claude CLI 与 OpenCode 的原生 macOS 菜单栏路由与状态工具。它提供 Agent 切换、模型与提供商管理、用量展示和任务状态，无需修改这些 Agent 应用本体。
 
 
 ## 快速安装
@@ -30,6 +30,14 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 <p align="center">
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse 菜单栏预览" width="100%">
 </p>
+
+## 3.3.0 更新
+
+- 仪表盘新增官方与三方提供商余额卡片，使用双列块状布局，只展示提供商与账户余额，并支持直接添加或删除三方配置。
+- macOS 桌面小组件升级：小号组件展示当前提供商余额，中号组件以卡片形式展示多个账户余额。
+- 状态栏新增“当前余额”和“轮播全部”模式，可轮播官方与三方账户；切换时使用平滑淡入淡出动画，并遵循系统“减少动态效果”设置。
+- 新增 Claude CLI 与 OpenCode Agent 支持，包括安装检测、启动、提供商绑定、模型配置和 Anthropic Messages API。
+- 提供商余额缓存会同步到仪表盘、模型列表、状态栏与桌面小组件，刷新频率保持每分钟一次。
 
 ## 3.2.0 更新
 
@@ -49,21 +57,14 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 - 优化状态与外观页面、Agent 选择区域、按钮和选择控件；菜单栏样式图标与文字间距更清晰。
 - 配置备份与历史数据只保存在本机，不保存或导出钥匙串 API Key，也不修改 Agent 会话数据库。
 
-## 3.0.2 更新
-
-- 修复状态栏余额变化后，模型配置列表仍停留旧值的问题；官方用量与提供商余额现在会同步刷新。
-- 停止启动时自动迁移旧会话，路由切换保留现有 `model_provider`，不改写 Codex 会话数据库。
-- 新增 Codex 专属 `model_provider` 配置入口，修改前自动备份 `config.toml`。
-- “立即更新”支持退出应用后在后台下载、校验、安装并自动重新打开。
-
 ## 核心功能
 
 | 功能 | 说明 |
 | --- | --- |
-| Agent 切换 | 在 Codex、Cursor 与 Hermes 之间选择、监控并快速启动 |
-| 路由切换 | 为 Codex 与 Hermes 管理官方配置、预设厂商和自定义提供商 |
+| Agent 切换 | 在 Codex、Cursor、Hermes、Claude CLI 与 OpenCode 之间选择、监控并快速启动 |
+| 路由切换 | 为支持的 Agent 管理官方配置、预设厂商和自定义提供商 |
 | 提供商预设 | 内置 DeepSeek、智谱 AI、月之暗面、MiniMax、阶跃星辰、MiMo 与阿里百炼云，也支持自定义 |
-| 用量与仪表盘 | 集中查看官方用量、提供商余额，以及 Hermes 本地 Token、请求与费用 |
+| 用量与仪表盘 | 使用双列卡片集中查看官方用量及全部提供商余额，并同步到状态栏和桌面组件 |
 | 任务状态 | 支持 Codex 日志、Cursor Hooks 与 Hermes Gateway；红色执行、黄色工具、绿色完成 |
 | 监控与历史 | 按模型设置提醒阈值、检测路由状态、查看本地趋势并导出 CSV |
 | 配置与安全 | 本地配置快照、差异预览、恢复与脱敏导入导出 |
@@ -75,7 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 使用方式
 
-1. 打开 Agent Pulse，选择 `Codex`、`Cursor` 或 `Hermes`。
+1. 打开 Agent Pulse，选择 `Codex`、`Cursor`、`Hermes`、`Claude CLI` 或 `OpenCode`。
 2. Codex 可选择 OpenAI 官方路由，或添加预设/自定义提供商并测试连接。
 3. Cursor 继续在官方应用中管理模型和 API Key；Agent Pulse 可绑定一个已配置的提供商展示余额。
 4. Hermes 可保留当前配置，也可以添加提供商并选择模型；切换后不会重启正在运行的任务。
@@ -91,7 +92,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-3.2.0.dmg`](dist/Agent-Pulse-3.2.0.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-3.3.0.dmg`](dist/Agent-Pulse-3.3.0.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -105,7 +106,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.2.0.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.0.dmg`。
 
 ## 隐私与安全
 
@@ -136,4 +137,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`3.2.0`
+当前版本：`3.3.0`
