@@ -706,7 +706,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.setAccessibilityLabel(title)
         button.alignment = .left
         button.title = ""
-        statusItem.length = StatusBalanceLayout.statusItemWidth
+        statusItem.length = rotatingBalanceStatusItemWidth
         statusBalanceOverlayView.isHidden = false
         layoutStatusBalanceOverlay(in: button)
         statusBalanceOverlayView.set(
@@ -892,6 +892,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard size.width > 0, size.height > 0 else {
             return NSSize(width: StatusBalanceLayout.statusIconSlotWidth, height: 18)
         }
+        if statusIconStyle == .trafficLight {
+            return size
+        }
         let scale = min(
             StatusBalanceLayout.statusIconSlotWidth / size.width,
             18 / size.height,
@@ -927,11 +930,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !statusBalanceOverlayView.isHidden else { return }
         button.layoutSubtreeIfNeeded()
         statusBalanceOverlayView.frame = NSRect(
-            x: StatusBalanceLayout.balanceX,
+            x: rotatingBalanceX,
             y: (button.bounds.height - StatusBalanceOverlayView.fixedSize.height) / 2,
             width: StatusBalanceOverlayView.fixedSize.width,
             height: StatusBalanceOverlayView.fixedSize.height
         )
+    }
+
+    private var rotatingBalanceX: CGFloat {
+        statusIconStyle == .trafficLight
+            ? StatusBalanceLayout.trafficLightBalanceX
+            : StatusBalanceLayout.balanceX
+    }
+
+    private var rotatingBalanceStatusItemWidth: CGFloat {
+        statusIconStyle == .trafficLight
+            ? StatusBalanceLayout.trafficLightStatusItemWidth
+            : StatusBalanceLayout.statusItemWidth
     }
 
     private func syncIconAnimationTimer() {

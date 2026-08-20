@@ -1113,6 +1113,8 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(compositeStatusImage.tiffRepresentation != nil)
     precondition(StatusBalanceLayout.fitsStatusItem)
     precondition(StatusBalanceLayout.statusIconSlotWidth == 24)
+    precondition(StatusBalanceLayout.trafficLightIconWidth == 54)
+    precondition(StatusBalanceLayout.trafficLightFitsStatusItem)
     precondition(StatusBalanceLayout.balanceX - (
         StatusBalanceLayout.statusIconX + 18
     ) == 10)
