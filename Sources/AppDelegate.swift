@@ -262,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var route = RouteConfigManager.currentRoute()
     private var routeDisplayName = "OpenAI 官方"
     private var latestCodeUsage: UsageResponse?
+    private var latestCodeUsageByProviderID: [String: UsageResponse] = [:]
     private var latestProviderBalance: ProviderBalanceSnapshot?
     private var latestOfficialUsage: OfficialUsageSnapshot?
     private var latestCursorStatus = CursorStatus.unavailable
@@ -532,6 +533,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         latestError = nil
         lastUpdated = Date()
         latestCodeUsage = validatedCodeUsage
+        if case let .provider(id) = route, let validatedCodeUsage {
+            latestCodeUsageByProviderID[id] = validatedCodeUsage
+        }
         latestProviderBalance = nil
         latestOfficialUsage = nil
         startStartupChase()
@@ -746,12 +750,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch route {
         case let .provider(id):
             let provider = ProviderStore.provider(id: id)
-            if provider?.isCodeAPI == true, let data = latestCodeUsage {
-                title = money(data.balance)
+            let providerName = provider?.name ?? "第三方"
+            if let data = latestCodeUsage {
+                title = "\(providerName) \(money(data.balance))"
+            } else if let cached = BalanceOverviewStore.entry(providerID: id),
+                      BalanceOverviewStore.hasUsableValue(cached.value) {
+                title = "\(providerName) \(compact(cached.value))"
             } else if let balance = latestProviderBalance {
-                title = compact(balance.displayText)
+                title = "\(providerName) \(compact(balance.displayText))"
             } else {
-                title = compact(provider?.name ?? "第三方")
+                title = compact(providerName)
             }
         case .official:
             if latestOfficialUsage?.isLoggedIn == false {
@@ -773,9 +781,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func balanceEntriesForRotation() -> [BalanceOverviewEntry] {
         BalanceOverviewStore.entries().filter { entry in
-            guard entry.id == "official:cursor" else { return true }
-            let unavailable = ["", "—", "不可用", "未安装", "未登录", "正在读取"]
-            return !unavailable.contains(entry.value)
+            guard BalanceOverviewStore.hasUsableValue(entry.value) else { return false }
+            if entry.id == "official:cursor",
+               latestCursorStatus.isAuthenticated != true || latestCursorOfficialUsage == nil {
+                return false
+            }
+            return true
         }
     }
 
@@ -1202,6 +1213,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         usageLabel = "提供商余额"
                         usageValue = money(usage.balance)
                         usageDetail = "今日费用 \(money(usage.usage.today.actualCost)) · \(number(usage.usage.today.totalTokens)) Token"
+                    } else if provider.isCodeAPI,
+                              let cached = BalanceOverviewStore.entry(providerID: id),
+                              BalanceOverviewStore.hasUsableValue(cached.value) {
+                        usageLabel = "提供商余额"
+                        usageValue = cached.value
+                        usageDetail = "显示上次成功余额 · 等待下一次刷新"
                     } else if let balance = latestProviderBalance {
                         usageLabel = balance.displayText.hasPrefix("配额") ? "提供商配额" : "提供商余额"
                         usageValue = balance.displayText
@@ -1317,6 +1334,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         latestCursorOfficialUsage = try await CursorOfficialUsageClient.fetch()
                     } catch {
                         latestCursorOfficialUsage = nil
+                        if let cursorError = error as? CursorOfficialUsageError,
+                           case .notLoggedIn = cursorError {
+                            BalanceOverviewStore.remove(id: "official:cursor")
+                            balanceOverviewDidChange()
+                        }
                         errors.append(error.localizedDescription)
                     }
                 } else {
@@ -1458,14 +1480,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     updateStatusTitle()
                     return
                 }
-                latestCodeUsage = nil
                 latestProviderBalance = nil
                 if provider.isCodeAPI {
-                    latestCodeUsage = try await CodeAPIClient.fetch(key: key)
-                    if let usage = latestCodeUsage {
+                    // Keep the last successful value for this exact provider
+                    // while a transient refresh fails. This is important for
+                    // providers sharing the CodeAPI URL but using different
+                    // API keys (for example CodeAPI and CodeAPI zq).
+                    latestCodeUsage = latestCodeUsageByProviderID[id]
+                    do {
+                        let usage = try await CodeAPIClient.fetch(key: key)
+                        latestCodeUsage = usage
+                        latestCodeUsageByProviderID[id] = usage
                         publishProviderBalance(providerID: id, usage: usage)
+                    } catch {
+                        latestCodeUsage = latestCodeUsageByProviderID[id]
+                        throw error
                     }
                 } else if provider.effectiveVendor.supportsBalanceLookup {
+                    latestCodeUsage = nil
                     let managementKey = CredentialStore.load(
                         providerID: ProviderBalanceClient.managementCredentialID(for: provider.id)
                     )
@@ -1482,6 +1514,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                 }
             case .official:
+                latestCodeUsage = nil
                 latestProviderBalance = nil
                 latestOfficialUsage = try await OfficialUsageClient.fetch()
             }
@@ -1553,9 +1586,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 modelKey = "codex:\(id)"
                 modelName = ProviderStore.provider(id: id)?.model
                 if ProviderStore.provider(id: id)?.isCodeAPI == true {
-                    balance = latestCodeUsage?.balance
-                    tokens = latestCodeUsage?.usage.today.totalTokens
-                    cost = latestCodeUsage?.usage.today.actualCost
+                    if let usage = latestCodeUsage {
+                        balance = usage.balance
+                        tokens = usage.usage.today.totalTokens
+                        cost = usage.usage.today.actualCost
+                    } else if let cached = BalanceOverviewStore.entry(providerID: id),
+                              BalanceOverviewStore.hasUsableValue(cached.value) {
+                        balance = Self.numericValue(in: cached.value)
+                    }
                 } else {
                     remainingPercent = Self.percentValue(in: latestProviderBalance?.displayText)
                     balance = Self.numericValue(in: latestProviderBalance?.displayText)
@@ -1703,6 +1741,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func addCodeUsageMenu(to menu: NSMenu) {
         guard let data = latestCodeUsage else {
+            if case let .provider(id) = route,
+               let cached = BalanceOverviewStore.entry(providerID: id),
+               BalanceOverviewStore.hasUsableValue(cached.value) {
+                menu.addItem(info(cached.value, emphasis: true))
+                if let provider = ProviderStore.provider(id: id) {
+                    menu.addItem(info("模型  \(provider.model)"))
+                    menu.addItem(info("地址  \(provider.baseURL)"))
+                }
+                menu.addItem(info("显示上次成功余额；等待下一次刷新"))
+                return
+            }
             menu.addItem(info("暂无 CodeAPI 用量数据"))
             return
         }

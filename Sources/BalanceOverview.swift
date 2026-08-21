@@ -78,6 +78,20 @@ enum BalanceOverviewStore {
         return values.sorted(by: sort)
     }
 
+    static func entry(providerID: String) -> BalanceOverviewEntry? {
+        entries().first { $0.providerID == providerID }
+    }
+
+    static func hasUsableValue(_ value: String) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        let transientValues = [
+            "—", "-", "余额读取中", "配额读取中", "余额不可用", "配额不可用",
+            "余额 —", "余额 未配置", "暂不支持查询", "未配置 API Key", "正在读取"
+        ]
+        return !transientValues.contains(normalized)
+    }
+
     static func upsert(_ entry: BalanceOverviewEntry) {
         var values = entries().filter { $0.id != entry.id }
         values.append(entry)

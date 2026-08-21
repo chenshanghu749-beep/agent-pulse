@@ -1474,6 +1474,10 @@ final class SettingsWindowController: NSWindowController {
 
     private func dashboardBalanceText(for provider: ProviderProfile) -> String {
         if let cached = providerBalances[provider.id] { return cached }
+        if let persisted = BalanceOverviewStore.entry(providerID: provider.id),
+           BalanceOverviewStore.hasUsableValue(persisted.value) {
+            return persisted.value
+        }
         guard provider.effectiveVendor.supportsBalanceLookup || provider.isCodeAPI else {
             return "暂不支持查询"
         }
@@ -1496,6 +1500,11 @@ final class SettingsWindowController: NSWindowController {
         text: String,
         detail: String?
     ) {
+        if !BalanceOverviewStore.hasUsableValue(dashboardDisplayValue(text)),
+           let existing = BalanceOverviewStore.entry(providerID: provider.id),
+           BalanceOverviewStore.hasUsableValue(existing.value) {
+            return
+        }
         BalanceOverviewStore.upsert(BalanceOverviewEntry(
             id: "provider:\(provider.id)",
             providerID: provider.id,
@@ -2137,14 +2146,24 @@ final class SettingsWindowController: NSWindowController {
                         expectedAgent: agent
                     )
                 } catch {
-                    let unavailable = provider.effectiveVendor == .zhipuAI || provider.effectiveVendor == .miniMax
-                        ? "配额不可用" : "余额不可用"
-                    storeProviderBalance(
-                        unavailable,
-                        providerID: provider.id,
-                        toolTip: error.localizedDescription,
-                        expectedAgent: agent
-                    )
+                    if let existing = BalanceOverviewStore.entry(providerID: provider.id),
+                       BalanceOverviewStore.hasUsableValue(existing.value) {
+                        providerBalances[provider.id] = existing.value
+                        providerBalanceUpdatedAt[provider.id] = Date()
+                        providerBalanceLabels[provider.id]?.stringValue = existing.value
+                        providerBalanceLabels[provider.id]?.toolTip = error.localizedDescription
+                        dashboardProviderBalanceLabels[provider.id]?.stringValue = existing.value
+                        dashboardProviderBalanceLabels[provider.id]?.toolTip = error.localizedDescription
+                    } else {
+                        let unavailable = provider.effectiveVendor == .zhipuAI || provider.effectiveVendor == .miniMax
+                            ? "配额不可用" : "余额不可用"
+                        storeProviderBalance(
+                            unavailable,
+                            providerID: provider.id,
+                            toolTip: error.localizedDescription,
+                            expectedAgent: agent
+                        )
+                    }
                 }
             }
         }

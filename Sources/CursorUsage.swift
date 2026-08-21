@@ -71,6 +71,16 @@ enum CursorOfficialUsageClient {
         guard CursorUsagePreference.officialUsageEnabled else {
             throw CursorOfficialUsageError.permissionRequired
         }
+        // The local database can retain an expired access token after a user
+        // signs out. Cursor's usage endpoint may still answer with a valid
+        // looking 100% payload, so use the CLI's explicit auth state as the
+        // source of truth whenever it is available.
+        let cliStatus = await Task.detached(priority: .utility) {
+            CursorIntegration.readCLIStatus(appInstalled: true)
+        }.value
+        if cliStatus.isAuthenticated == false {
+            throw CursorOfficialUsageError.notLoggedIn
+        }
         let token = try await Task.detached(priority: .utility) {
             try readAccessToken()
         }.value
