@@ -980,7 +980,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard size.width > 0, size.height > 0 else {
             return NSSize(width: StatusBalanceLayout.statusIconSlotWidth, height: 18)
         }
-        if statusIconStyle == .trafficLight {
+        if statusIconStyle == .trafficLight || statusIconStyle == .pinwheel {
             return size
         }
         let scale = min(
@@ -1026,15 +1026,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var rotatingBalanceX: CGFloat {
-        statusIconStyle == .trafficLight
-            ? StatusBalanceLayout.trafficLightBalanceX
-            : StatusBalanceLayout.balanceX
+        switch statusIconStyle {
+        case .trafficLight:
+            return StatusBalanceLayout.trafficLightBalanceX
+        case .pinwheel:
+            return StatusBalanceLayout.pinwheelBalanceX
+        default:
+            return StatusBalanceLayout.balanceX
+        }
     }
 
     private var rotatingBalanceStatusItemWidth: CGFloat {
-        statusIconStyle == .trafficLight
-            ? StatusBalanceLayout.trafficLightStatusItemWidth
-            : StatusBalanceLayout.statusItemWidth
+        switch statusIconStyle {
+        case .trafficLight:
+            return StatusBalanceLayout.trafficLightStatusItemWidth
+        case .pinwheel:
+            return StatusBalanceLayout.pinwheelStatusItemWidth
+        default:
+            return StatusBalanceLayout.statusItemWidth
+        }
     }
 
     private func syncIconAnimationTimer() {

@@ -9,6 +9,9 @@ enum StatusBalanceLayout {
     static let trafficLightIconWidth: CGFloat = 54
     static let trafficLightBalanceX: CGFloat = 62
     static let trafficLightStatusItemWidth: CGFloat = 184
+    static let pinwheelIconWidth: CGFloat = 29
+    static let pinwheelBalanceX: CGFloat = 36
+    static let pinwheelStatusItemWidth: CGFloat = 158
     static let rotationInterval: TimeInterval = 5
     static let contentMaxX = balanceX + balanceWidth
 
@@ -20,6 +23,11 @@ enum StatusBalanceLayout {
     static var trafficLightFitsStatusItem: Bool {
         statusIconX + trafficLightIconWidth <= trafficLightBalanceX
             && trafficLightBalanceX + balanceWidth <= trafficLightStatusItemWidth
+    }
+
+    static var pinwheelFitsStatusItem: Bool {
+        statusIconX + pinwheelIconWidth <= pinwheelBalanceX
+            && pinwheelBalanceX + balanceWidth <= pinwheelStatusItemWidth
     }
 }
 

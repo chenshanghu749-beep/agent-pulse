@@ -4,7 +4,7 @@ import Foundation
 let usageURL = URL(string: "https://codeapi.nexita.net/v1/usage")!
 let dashboardURL = URL(string: "https://codeapi.nexita.net/dashboard")!
 
-struct UsageResponse: Codable {
+struct UsageResponse: Decodable {
     let balance: Double
     let dailyUsage: [DailyUsage]?
     let isValid: Bool
@@ -23,12 +23,49 @@ struct UsageResponse: Codable {
         case modelStats = "model_stats"
         case planName
         case remaining
+        case quota
         case unit
         case usage
     }
+
+    /// CodeAPI 的 usage 接口在不同版本中返回过两种结构：旧版使用
+    /// `balance`，新版使用 `quota` / `remaining`。这里统一归一化，避免
+    /// HTTP 200 响应因为缺少旧字段而被误判为“连接失败”。
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let balance = decodeNumber(container, forKey: .balance)
+        let remaining = decodeNumber(container, forKey: .remaining)
+        let quota = decodeNumber(container, forKey: .quota)
+
+        self.balance = balance ?? remaining ?? quota ?? 0
+        self.dailyUsage = try? container.decodeIfPresent([DailyUsage].self, forKey: .dailyUsage)
+        self.isValid = (try? container.decodeIfPresent(Bool.self, forKey: .isValid)) ?? true
+        self.mode = try? container.decodeIfPresent(String.self, forKey: .mode)
+        self.modelStats = try? container.decodeIfPresent([ModelStat].self, forKey: .modelStats)
+        self.planName = try? container.decodeIfPresent(String.self, forKey: .planName)
+        self.remaining = remaining
+        self.unit = try? container.decodeIfPresent(String.self, forKey: .unit)
+        self.usage = (try? container.decodeIfPresent(UsageSummary.self, forKey: .usage)) ?? .empty
+    }
 }
 
-struct DailyUsage: Codable {
+private func decodeNumber<Key: CodingKey>(
+    _ container: KeyedDecodingContainer<Key>,
+    forKey key: Key
+) -> Double? {
+    if let value = try? container.decode(Double.self, forKey: key) {
+        return value
+    }
+    if let value = try? container.decode(Int.self, forKey: key) {
+        return Double(value)
+    }
+    if let value = try? container.decode(String.self, forKey: key) {
+        return Double(value)
+    }
+    return nil
+}
+
+struct DailyUsage: Decodable {
     let date: String
     let requests: Int
     let inputTokens: Int
@@ -47,7 +84,7 @@ struct DailyUsage: Codable {
     }
 }
 
-struct ModelStat: Codable {
+struct ModelStat: Decodable {
     let model: String
     let requests: Int
     let inputTokens: Int
@@ -67,7 +104,7 @@ struct ModelStat: Codable {
     }
 }
 
-struct UsageSummary: Codable {
+struct UsageSummary: Decodable {
     let averageDurationMs: Double
     let rpm: Int?
     let tpm: Int?
@@ -78,9 +115,34 @@ struct UsageSummary: Codable {
         case averageDurationMs = "average_duration_ms"
         case rpm, tpm, today, total
     }
+
+    static let empty = UsageSummary(
+        averageDurationMs: 0,
+        rpm: nil,
+        tpm: nil,
+        today: .empty,
+        total: .empty
+    )
+
+    init(averageDurationMs: Double, rpm: Int?, tpm: Int?, today: UsagePeriod, total: UsagePeriod) {
+        self.averageDurationMs = averageDurationMs
+        self.rpm = rpm
+        self.tpm = tpm
+        self.today = today
+        self.total = total
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.averageDurationMs = decodeNumber(container, forKey: .averageDurationMs) ?? 0
+        self.rpm = try? container.decodeIfPresent(Int.self, forKey: .rpm)
+        self.tpm = try? container.decodeIfPresent(Int.self, forKey: .tpm)
+        self.today = (try? container.decodeIfPresent(UsagePeriod.self, forKey: .today)) ?? .empty
+        self.total = (try? container.decodeIfPresent(UsagePeriod.self, forKey: .total)) ?? .empty
+    }
 }
 
-struct UsagePeriod: Codable {
+struct UsagePeriod: Decodable {
     let actualCost: Double
     let cacheCreationTokens: Int
     let cacheReadTokens: Int
@@ -99,6 +161,49 @@ struct UsagePeriod: Codable {
         case outputTokens = "output_tokens"
         case requests
         case totalTokens = "total_tokens"
+    }
+
+    static let empty = UsagePeriod(
+        actualCost: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        cost: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        requests: 0,
+        totalTokens: 0
+    )
+
+    init(
+        actualCost: Double,
+        cacheCreationTokens: Int,
+        cacheReadTokens: Int,
+        cost: Double,
+        inputTokens: Int,
+        outputTokens: Int,
+        requests: Int,
+        totalTokens: Int
+    ) {
+        self.actualCost = actualCost
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cost = cost
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.requests = requests
+        self.totalTokens = totalTokens
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.actualCost = decodeNumber(container, forKey: .actualCost) ?? 0
+        self.cacheCreationTokens = (try? container.decodeIfPresent(Int.self, forKey: .cacheCreationTokens)) ?? nil ?? 0
+        self.cacheReadTokens = (try? container.decodeIfPresent(Int.self, forKey: .cacheReadTokens)) ?? nil ?? 0
+        self.cost = decodeNumber(container, forKey: .cost) ?? 0
+        self.inputTokens = (try? container.decodeIfPresent(Int.self, forKey: .inputTokens)) ?? nil ?? 0
+        self.outputTokens = (try? container.decodeIfPresent(Int.self, forKey: .outputTokens)) ?? nil ?? 0
+        self.requests = (try? container.decodeIfPresent(Int.self, forKey: .requests)) ?? nil ?? 0
+        self.totalTokens = (try? container.decodeIfPresent(Int.self, forKey: .totalTokens)) ?? nil ?? 0
     }
 }
 
@@ -1115,6 +1220,8 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(StatusBalanceLayout.statusIconSlotWidth == 24)
     precondition(StatusBalanceLayout.trafficLightIconWidth == 54)
     precondition(StatusBalanceLayout.trafficLightFitsStatusItem)
+    precondition(StatusBalanceLayout.pinwheelIconWidth == 29)
+    precondition(StatusBalanceLayout.pinwheelFitsStatusItem)
     precondition(StatusBalanceLayout.balanceX - (
         StatusBalanceLayout.statusIconX + 18
     ) == 10)
