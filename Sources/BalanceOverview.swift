@@ -1,17 +1,19 @@
 import Foundation
 
 enum StatusBalanceLayout {
-    static let statusItemWidth: CGFloat = 154
+    static let statusItemWidth: CGFloat = 176
     static let statusIconX: CGFloat = 4
     static let statusIconSlotWidth: CGFloat = 24
     static let balanceX: CGFloat = 32
-    static let balanceWidth: CGFloat = 114
+    // Fits the longest built-in balance title (for example
+    // "官方 5h 99% · 7d 59%") without clipping the trailing window.
+    static let balanceWidth: CGFloat = 136
     static let trafficLightIconWidth: CGFloat = 54
     static let trafficLightBalanceX: CGFloat = 62
-    static let trafficLightStatusItemWidth: CGFloat = 184
+    static let trafficLightStatusItemWidth: CGFloat = 206
     static let pinwheelIconWidth: CGFloat = 29
     static let pinwheelBalanceX: CGFloat = 36
-    static let pinwheelStatusItemWidth: CGFloat = 158
+    static let pinwheelStatusItemWidth: CGFloat = 180
     static let rotationInterval: TimeInterval = 5
     static let contentMaxX = balanceX + balanceWidth
 

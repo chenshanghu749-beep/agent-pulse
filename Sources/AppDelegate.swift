@@ -221,7 +221,10 @@ private final class StatusBalanceOverlayView: NSView {
 }
 
 func statusBalanceOverlayRecoverySelfTest() {
-    let overlay = StatusBalanceOverlayView(frame: NSRect(x: 0, y: 0, width: 114, height: 22))
+    let overlay = StatusBalanceOverlayView(frame: NSRect(
+        origin: .zero,
+        size: StatusBalanceOverlayView.fixedSize
+    ))
     overlay.set(provider: "DeepSeek", value: "$166.32", animated: false)
     precondition(overlay.subviews.count == 1)
     overlay.addSubview(NSView(frame: overlay.bounds.offsetBy(dx: 0, dy: -overlay.bounds.height)))
@@ -764,23 +767,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .official:
             if latestOfficialUsage?.isLoggedIn == false {
                 title = "官方 · 未登录"
-            } else if let window = latestOfficialUsage?.primary {
-                title = "官方 \(percent(window.remainingPercent))"
+            } else if let usage = latestOfficialUsage,
+                      let statusText = usage.statusBarUsageText {
+                title = "官方 \(statusText)"
             } else if latestOfficialUsage?.isLoggedIn == true {
                 title = "官方 —"
             } else {
                 title = "官方 …"
             }
         }
+        let statusTitle = route == .official ? title : "Codex · \(title)"
         applyStatusTitle(
-            "Codex · \(title)",
+            statusTitle,
             toolTip: "Agent Pulse · Codex · \(route.displayName)",
             to: button
         )
     }
 
     private func balanceEntriesForRotation() -> [BalanceOverviewEntry] {
-        BalanceOverviewStore.entries().filter { entry in
+        var entries = BalanceOverviewStore.entries()
+        entries.removeAll { $0.id == "official:openai" }
+        if let usage = latestOfficialUsage, usage.isLoggedIn,
+           let statusText = usage.statusBarUsageText {
+            entries.append(BalanceOverviewEntry(
+                id: "official:openai",
+                providerID: nil,
+                name: "官方",
+                value: statusText,
+                detail: usage.detailedUsageText ?? "OpenAI 官方用量",
+                isOfficial: true,
+                updatedAt: Date()
+            ))
+        }
+        return entries.sorted {
+            if $0.isOfficial != $1.isOfficial { return $0.isOfficial }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }.filter { entry in
             guard BalanceOverviewStore.hasUsableValue(entry.value) else { return false }
             if entry.id == "official:cursor",
                latestCursorStatus.isAuthenticated != true || latestCursorOfficialUsage == nil {
@@ -1196,13 +1218,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if latestOfficialUsage?.isLoggedIn == false {
                     usageValue = "未登录"
                     usageDetail = "请先登录 OpenAI 官方账号"
-                } else if let primary = latestOfficialUsage?.primary {
-                    usageValue = percent(primary.remainingPercent)
-                    if let secondary = latestOfficialUsage?.secondary {
-                        usageDetail = "\(primary.label) · \(secondary.label)剩余 \(percent(secondary.remainingPercent))"
-                    } else {
-                        usageDetail = "\(primary.label) · \(resetFormatter.string(from: primary.resetsAt)) 重置"
-                    }
+                } else if let usage = latestOfficialUsage,
+                          let compact = usage.compactUsageText {
+                    usageValue = compact
+                    usageDetail = usage.rateLimitWindows.map {
+                        "\($0.statusBarLabel) \(resetFormatter.string(from: $0.resetsAt)) 重置"
+                    }.joined(separator: " · ")
                 } else if latestOfficialUsage?.isLoggedIn == true {
                     usageDetail = "官方账号已连接，暂未返回用量"
                 }
@@ -1517,6 +1538,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 latestCodeUsage = nil
                 latestProviderBalance = nil
                 latestOfficialUsage = try await OfficialUsageClient.fetch()
+                publishOpenAIOfficialUsage(latestOfficialUsage)
             }
             latestError = nil
             lastUpdated = Date()
@@ -1579,8 +1601,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             switch route {
             case .official:
-                remainingPercent = latestOfficialUsage?.primary?.remainingPercent
-                resetAt = latestOfficialUsage?.primary?.resetsAt
+                remainingPercent = latestOfficialUsage?.limitingWindow?.remainingPercent
+                resetAt = latestOfficialUsage?.limitingWindow?.resetsAt
                 modelName = ProviderStore.officialModel() ?? "ChatGPT 登录模型"
             case let .provider(id):
                 modelKey = "codex:\(id)"
@@ -1642,6 +1664,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 detail: "CodeAPI 账户余额"
             )
         )
+    }
+
+    private func publishOpenAIOfficialUsage(_ usage: OfficialUsageSnapshot?) {
+        let id = "official:openai"
+        guard let usage, usage.isLoggedIn,
+              let compact = usage.compactUsageText else {
+            BalanceOverviewStore.remove(id: id)
+            balanceOverviewDidChange()
+            return
+        }
+        BalanceOverviewStore.upsert(BalanceOverviewEntry(
+            id: id,
+            providerID: nil,
+            name: "OpenAI 官方",
+            value: compact,
+            detail: usage.detailedUsageText ?? "OpenAI 官方用量",
+            isOfficial: true,
+            updatedAt: Date()
+        ))
+        balanceOverviewDidChange()
     }
 
     private func rebuildMainMenu() {
@@ -1803,13 +1845,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(info("官方用量暂不可用", emphasis: true))
             menu.addItem(info("请稍后重新刷新。"))
         }
-        if let primary = data.primary {
-            menu.addItem(info("\(primary.label)剩余  \(percent(primary.remainingPercent))", emphasis: true))
-            menu.addItem(info("重置时间  \(resetFormatter.string(from: primary.resetsAt))"))
-        }
-        if let secondary = data.secondary {
-            menu.addItem(info("\(secondary.label)剩余  \(percent(secondary.remainingPercent))"))
-            menu.addItem(info("重置时间  \(resetFormatter.string(from: secondary.resetsAt))"))
+        for (index, window) in data.rateLimitWindows.enumerated() {
+            menu.addItem(info(
+                "\(window.statusBarLabel) 剩余  \(percent(window.remainingPercent))",
+                emphasis: index == 0
+            ))
+            menu.addItem(info("\(window.statusBarLabel) 重置  \(resetFormatter.string(from: window.resetsAt))"))
         }
         if let tokens = data.tokenUsage {
             menu.addItem(.separator())

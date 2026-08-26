@@ -37,8 +37,8 @@ struct AgentPulseWidgetData: Codable {
         balances: [
             AgentPulseWidgetBalanceItem(
                 name: "OpenAI 官方",
-                value: "82%",
-                detail: "5 小时剩余",
+                value: "5h 82% · 7d 61%",
+                detail: "5h / 7d 官方用量剩余",
                 isOfficial: true
             )
         ]
@@ -164,10 +164,12 @@ enum AgentPulseWidgetStore {
             case .official:
                 if let officialUsage, officialUsage.isLoggedIn {
                     modelName = officialUsage.planType ?? "ChatGPT"
-                    if let window = officialUsage.primary {
-                        primaryValue = String(format: "%.0f%%", window.remainingPercent)
+                    if let compact = officialUsage.compactUsageText {
+                        primaryValue = compact
                         primaryLabel = "官方用量剩余"
-                        detail = "\(window.label) · 自动刷新"
+                        detail = officialUsage.rateLimitWindows.map {
+                            "\($0.statusBarLabel) \(String(format: "%.0f%%", $0.remainingPercent))"
+                        }.joined(separator: " · ")
                     } else {
                         primaryValue = "—"
                         primaryLabel = "官方用量剩余"

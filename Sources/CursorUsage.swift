@@ -251,11 +251,18 @@ enum CursorOfficialUsageClient {
         camel: String,
         snake: String
     ) -> Double? {
-        guard var used = decimal(value, camel: camel, snake: snake), used.isFinite else {
+        guard let used = decimal(value, camel: camel, snake: snake), used.isFinite else {
             return nil
         }
-        if used > 0, used <= 1 { used *= 100 }
-        return min(100, max(0, 100 - used))
+        // Cursor names these fields `*PercentUsed`, and older 1.x clients / some
+        // accounts can return fractional percentage points such as 0.41 for
+        // 0.41% used. Treating values <= 1 as a 0...1 ratio turns 0.41% into
+        // 41%, which incorrectly reports only 59% remaining. Cursor displays
+        // whole percentages by rounding usage up (0.41% -> used 1%), so mirror
+        // that presentation and report 99% remaining instead of rounding 99.59
+        // up to 100%.
+        let displayedUsed = ceil(min(100, max(0, used)))
+        return 100 - displayedUsed
     }
 
     private static func date(

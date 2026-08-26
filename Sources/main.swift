@@ -600,6 +600,71 @@ if CommandLine.arguments.contains("--login-status-test") {
         semaphore.signal()
     }
     semaphore.wait()
+} else if CommandLine.arguments.contains("--official-window-display-test") {
+    let shortWindow = OfficialRateLimitWindow(
+        usedPercent: 1,
+        windowDurationMins: 300,
+        resetsAt: Date(timeIntervalSince1970: 1_800_000_000)
+    )
+    let weeklyWindow = OfficialRateLimitWindow(
+        usedPercent: 41,
+        windowDurationMins: 10_080,
+        resetsAt: Date(timeIntervalSince1970: 1_800_500_000)
+    )
+    let usage = OfficialUsageSnapshot(
+        isLoggedIn: true,
+        accountType: "chatgpt",
+        email: nil,
+        primary: weeklyWindow,
+        secondary: shortWindow,
+        planType: "Plus",
+        resetCredits: nil,
+        tokenUsage: nil
+    )
+    guard usage.compactUsageText == "5h 99% · 7d 59%",
+          usage.statusBarUsageText == "5h 99% · 7d 59%",
+          usage.detailedUsageText == "5h 剩余 99% · 7d 剩余 59%",
+          usage.limitingWindow?.windowDurationMins == 10_080 else {
+        print("OFFICIAL_WINDOW_DISPLAY_ERROR \(usage.compactUsageText ?? "nil")")
+        exit(EXIT_FAILURE)
+    }
+    let providerFont = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+    let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+    let requiredWidth = ceil(
+        ("官方 " as NSString).size(withAttributes: [.font: providerFont]).width
+            + (usage.statusBarUsageText! as NSString).size(withAttributes: [.font: valueFont]).width
+    )
+    guard requiredWidth <= StatusBalanceLayout.balanceWidth else {
+        print("OFFICIAL_WINDOW_LAYOUT_ERROR required=\(requiredWidth) available=\(StatusBalanceLayout.balanceWidth)")
+        exit(1)
+    }
+    print("OFFICIAL_WINDOW_DISPLAY_OK \(usage.compactUsageText ?? "nil") width=\(requiredWidth)/\(StatusBalanceLayout.balanceWidth)")
+} else if CommandLine.arguments.contains("--cursor-usage-parser-test") {
+    let fixture = Data("""
+    {"planUsage":{"autoPercentUsed":0.41,"apiPercentUsed":1}}
+    """.utf8)
+    do {
+        let usage = try CursorOfficialUsageClient.parse(fixture)
+        let autoRemaining = usage.autoRemainingPercent ?? -1
+        let apiRemaining = usage.apiRemainingPercent ?? -1
+        guard abs(autoRemaining - 99) < 0.001,
+              abs(apiRemaining - 99) < 0.001 else {
+            print(String(
+                format: "CURSOR_USAGE_PARSER_ERROR autoRemaining=%.2f apiRemaining=%.2f",
+                autoRemaining,
+                apiRemaining
+            ))
+            exit(EXIT_FAILURE)
+        }
+        print(String(
+            format: "CURSOR_USAGE_PARSER_OK autoRemaining=%.2f apiRemaining=%.2f",
+            autoRemaining,
+            apiRemaining
+        ))
+    } catch {
+        print("CURSOR_USAGE_PARSER_ERROR \(error.localizedDescription)")
+        exit(EXIT_FAILURE)
+    }
 } else if CommandLine.arguments.contains("--session-history-test") {
     let semaphore = DispatchSemaphore(value: 0)
     Task.detached {
@@ -1140,6 +1205,31 @@ if CommandLine.arguments.contains("--login-status-test") {
         "Logged in using ChatGPT",
         terminationStatus: 0
     ))
+
+    let shortWindow = OfficialRateLimitWindow(
+        usedPercent: 1,
+        windowDurationMins: 300,
+        resetsAt: Date(timeIntervalSince1970: 1_800_000_000)
+    )
+    let weeklyWindow = OfficialRateLimitWindow(
+        usedPercent: 41,
+        windowDurationMins: 10_080,
+        resetsAt: Date(timeIntervalSince1970: 1_800_500_000)
+    )
+    let dualWindowUsage = OfficialUsageSnapshot(
+        isLoggedIn: true,
+        accountType: "chatgpt",
+        email: nil,
+        primary: shortWindow,
+        secondary: weeklyWindow,
+        planType: "Plus",
+        resetCredits: nil,
+        tokenUsage: nil
+    )
+    precondition(dualWindowUsage.compactUsageText == "5h 99% · 7d 59%")
+    precondition(dualWindowUsage.statusBarUsageText == "5h 99% · 7d 59%")
+    precondition(dualWindowUsage.detailedUsageText == "5h 剩余 99% · 7d 剩余 59%")
+    precondition(dualWindowUsage.limitingWindow?.windowDurationMins == 10_080)
     precondition(!OfficialUsageClient.loginStatusIndicatesChatGPT(
         "Not logged in",
         terminationStatus: 1
@@ -1225,7 +1315,7 @@ if CommandLine.arguments.contains("--login-status-test") {
     precondition(StatusBalanceLayout.balanceX - (
         StatusBalanceLayout.statusIconX + 18
     ) == 10)
-    precondition(StatusBalanceLayout.contentMaxX == 146)
+    precondition(StatusBalanceLayout.contentMaxX == 168)
     precondition(StatusBalanceLayout.statusItemWidth - StatusBalanceLayout.contentMaxX == 8)
     precondition(StatusBalanceLayout.rotationInterval == 5)
     precondition(StatusBalanceFormatter.twoDecimalDisplay("$166.43") == "$166.43")
@@ -1668,8 +1758,8 @@ if CommandLine.arguments.contains("--login-status-test") {
     {"planUsage":{"autoPercentUsed":0.25,"apiPercentUsed":1}}
     """.utf8)
     let cursorRatioUsage = try! CursorOfficialUsageClient.parse(cursorRatioFixture)
-    precondition(cursorRatioUsage.autoRemainingPercent == 75)
-    precondition(cursorRatioUsage.apiRemainingPercent == 0)
+    precondition(cursorRatioUsage.autoRemainingPercent == 99)
+    precondition(cursorRatioUsage.apiRemainingPercent == 99)
     let cursorTeamUsageFixture = Data("""
     {"spendLimitUsage":{"overallUsed":300,"overallLimit":1000,"overallRemaining":700}}
     """.utf8)

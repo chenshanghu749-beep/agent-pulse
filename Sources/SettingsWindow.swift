@@ -1539,9 +1539,12 @@ final class SettingsWindowController: NSWindowController {
                 if !usage.isLoggedIn {
                     value = "未登录"
                     detail = "OpenAI 官方账户"
-                } else if let primary = usage.primary {
-                    value = String(format: "%.0f%%", primary.remainingPercent)
-                    detail = "\(primary.label)剩余 · \(usage.planType ?? "ChatGPT")"
+                } else if let compact = usage.compactUsageText {
+                    value = compact
+                    let windows = usage.rateLimitWindows.map {
+                        "\($0.statusBarLabel) 剩余 \(String(format: "%.0f%%", $0.remainingPercent))"
+                    }.joined(separator: " · ")
+                    detail = "\(windows) · \(usage.planType ?? "ChatGPT")"
                 } else {
                     value = "—"
                     detail = usage.email ?? "官方用量暂不可用"

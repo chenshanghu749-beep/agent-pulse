@@ -16,6 +16,21 @@ struct OfficialRateLimitWindow: Sendable {
         default: return "\(windowDurationMins / 1440) 天"
         }
     }
+
+    var compactLabel: String {
+        switch windowDurationMins {
+        case 0..<360: return "短时"
+        case 360..<1440: return "\(windowDurationMins / 60)时"
+        case 10080: return "周"
+        default: return "\(windowDurationMins / 1440)天"
+        }
+    }
+
+    var statusBarLabel: String {
+        if windowDurationMins < 60 { return "\(windowDurationMins)m" }
+        if windowDurationMins < 1_440 { return "\(windowDurationMins / 60)h" }
+        return "\(windowDurationMins / 1_440)d"
+    }
 }
 
 struct OfficialTokenUsageSummary: Sendable {
@@ -36,6 +51,37 @@ struct OfficialUsageSnapshot: Sendable {
     let planType: String?
     let resetCredits: Int?
     let tokenUsage: OfficialTokenUsageSummary?
+
+    var rateLimitWindows: [OfficialRateLimitWindow] {
+        [primary, secondary]
+            .compactMap { $0 }
+            .sorted { $0.windowDurationMins < $1.windowDurationMins }
+    }
+
+    var compactUsageText: String? {
+        let parts = rateLimitWindows.map {
+            "\($0.statusBarLabel) \(String(format: "%.0f%%", $0.remainingPercent))"
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    var statusBarUsageText: String? {
+        let parts = rateLimitWindows.map {
+            "\($0.statusBarLabel) \(String(format: "%.0f%%", $0.remainingPercent))"
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    var detailedUsageText: String? {
+        let parts = rateLimitWindows.map {
+            "\($0.statusBarLabel) 剩余 \(String(format: "%.0f%%", $0.remainingPercent))"
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    var limitingWindow: OfficialRateLimitWindow? {
+        rateLimitWindows.min { $0.remainingPercent < $1.remainingPercent }
+    }
 
     static let loggedOut = OfficialUsageSnapshot(
         isLoggedIn: false,
