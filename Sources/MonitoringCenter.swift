@@ -27,6 +27,58 @@ struct UsageDailySummary: Sendable {
     let sampleCount: Int
 }
 
+enum UsageHistoryChartMetric: Equatable {
+    case remainingPercent
+    case balance
+    case tokens
+    case cost
+    case none
+}
+
+enum UsageHistoryChartPresentation {
+    static func metric(for summaries: [UsageDailySummary]) -> UsageHistoryChartMetric {
+        if summaries.contains(where: { $0.minimumRemainingPercent != nil }) { return .remainingPercent }
+        if summaries.contains(where: { ($0.latestBalance ?? 0) > 0 }) { return .balance }
+        if summaries.contains(where: { $0.totalTokens > 0 }) { return .tokens }
+        if summaries.contains(where: { $0.totalCost > 0 }) { return .cost }
+        return .none
+    }
+
+    static func hoverText(
+        for summary: UsageDailySummary,
+        metric: UsageHistoryChartMetric,
+        dateText: String
+    ) -> String? {
+        guard summary.sampleCount > 0 else { return "\(dateText) · 暂无采样" }
+        let value: String
+        switch metric {
+        case .remainingPercent:
+            guard let remaining = summary.minimumRemainingPercent else {
+                return "\(dateText) · 暂无配额数据 · \(summary.sampleCount) 次采样"
+            }
+            value = "剩余 \(String(format: "%.0f%%", remaining))"
+        case .balance:
+            guard let balance = summary.latestBalance else {
+                return "\(dateText) · 暂无余额数据 · \(summary.sampleCount) 次采样"
+            }
+            value = "余额 \(String(format: "%.2f", balance))"
+        case .tokens:
+            value = "Token \(formattedInteger(summary.totalTokens))"
+        case .cost:
+            value = "费用 $\(String(format: "%.2f", summary.totalCost))"
+        case .none:
+            return "\(dateText) · \(summary.sampleCount) 次采样"
+        }
+        return "\(dateText) · \(value) · \(summary.sampleCount) 次采样"
+    }
+
+    private static func formattedInteger(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
 enum UsageHistoryPreferences {
     private static let retentionKey = "usageHistoryRetentionDays"
     static var retentionDays: Int {
@@ -376,36 +428,135 @@ enum RouteHealthChecker {
 }
 
 final class UsageHistoryChartView: NSView {
-    var summaries: [UsageDailySummary] = [] { didSet { needsDisplay = true } }
+    var summaries: [UsageDailySummary] = [] {
+        didSet {
+            hoveredIndex = nil
+            needsDisplay = true
+        }
+    }
+    private var hoveredIndex: Int? { didSet { if oldValue != hoveredIndex { needsDisplay = true } } }
+    private var tracking: NSTrackingArea?
+
+    private lazy var dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
+        return formatter
+    }()
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let next = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(next)
+        tracking = next
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard !summaries.isEmpty else {
+            hoveredIndex = nil
+            return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point), bounds.width > 0 else {
+            hoveredIndex = nil
+            return
+        }
+        let columnWidth = bounds.width / CGFloat(summaries.count)
+        hoveredIndex = min(summaries.count - 1, max(0, Int(point.x / columnWidth)))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoveredIndex = nil
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard !summaries.isEmpty else { return }
-        let hasPercentage = summaries.contains { $0.minimumRemainingPercent != nil }
+        let metric = UsageHistoryChartPresentation.metric(for: summaries)
         let maximumBalance = summaries.compactMap(\.latestBalance).max() ?? 0
         let maximumTokens = summaries.map(\.totalTokens).max() ?? 0
         let maximumCost = summaries.map(\.totalCost).max() ?? 0
         let width = bounds.width / CGFloat(summaries.count)
+        var hoveredRect: NSRect?
         for (index, summary) in summaries.enumerated() {
             let value: Double
-            if hasPercentage {
+            switch metric {
+            case .remainingPercent:
                 value = summary.minimumRemainingPercent ?? 0
-            } else if maximumBalance > 0 {
+            case .balance:
                 value = (summary.latestBalance ?? 0) / maximumBalance * 100
-            } else if maximumTokens > 0 {
+            case .tokens:
                 value = Double(summary.totalTokens) / Double(maximumTokens) * 100
-            } else if maximumCost > 0 {
+            case .cost:
                 value = summary.totalCost / maximumCost * 100
-            } else {
+            case .none:
                 value = 0
             }
             let height = max(3, bounds.height * CGFloat(value / 100))
             let rect = NSRect(x: CGFloat(index) * width + 5, y: 0, width: max(4, width - 10), height: height)
-            let color: NSColor = hasPercentage && value <= 10
+            let isPercentage = metric == .remainingPercent
+            let color: NSColor = isPercentage && value <= 10
                 ? .systemRed
-                : (hasPercentage && value <= 20 ? .systemOrange : .labelColor)
+                : (isPercentage && value <= 20 ? .systemOrange : .labelColor)
             color.withAlphaComponent(summary.sampleCount == 0 ? 0.12 : 0.82).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
+            let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
+            path.fill()
+            if hoveredIndex == index {
+                hoveredRect = rect
+                NSColor.labelColor.withAlphaComponent(0.9).setStroke()
+                path.lineWidth = 1.4
+                path.stroke()
+            }
         }
+        if let hoveredIndex,
+           summaries.indices.contains(hoveredIndex),
+           let hoveredRect,
+           let text = UsageHistoryChartPresentation.hoverText(
+               for: summaries[hoveredIndex],
+               metric: metric,
+               dateText: dateFormatter.string(from: summaries[hoveredIndex].date)
+           ) {
+            drawHoverBubble(text, above: hoveredRect)
+        }
+    }
+
+    private func drawHoverBubble(_ text: String, above barRect: NSRect) {
+        let font = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+        let textColor = NSColor.labelColor
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor
+        ]
+        let textSize = ceilSize((text as NSString).size(withAttributes: attributes))
+        let bubbleSize = NSSize(width: textSize.width + 16, height: textSize.height + 8)
+        let x = min(
+            max(4, barRect.midX - bubbleSize.width / 2),
+            max(4, bounds.maxX - bubbleSize.width - 4)
+        )
+        let y = min(
+            max(4, barRect.maxY + 6),
+            max(4, bounds.maxY - bubbleSize.height - 4)
+        )
+        let bubbleRect = NSRect(origin: NSPoint(x: x, y: y), size: bubbleSize)
+        let bubble = NSBezierPath(roundedRect: bubbleRect, xRadius: 7, yRadius: 7)
+        NSColor.windowBackgroundColor.withAlphaComponent(0.96).setFill()
+        bubble.fill()
+        NSColor.labelColor.withAlphaComponent(0.18).setStroke()
+        bubble.lineWidth = 0.7
+        bubble.stroke()
+        (text as NSString).draw(
+            at: NSPoint(x: bubbleRect.minX + 8, y: bubbleRect.minY + 4),
+            withAttributes: attributes
+        )
+    }
+
+    private func ceilSize(_ size: NSSize) -> NSSize {
+        NSSize(width: ceil(size.width), height: ceil(size.height))
     }
 }

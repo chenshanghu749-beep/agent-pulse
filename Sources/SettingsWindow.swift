@@ -35,8 +35,15 @@ private final class SettingsPageView: NSView {
     }
 }
 
+enum TasteCardHoverStyle {
+    static func scale(isHovered: Bool, allowsContentScale: Bool) -> CGFloat {
+        isHovered && allowsContentScale ? 1.008 : 1
+    }
+}
+
 private class TasteCardView: NSBox {
     var respondsToHover = false
+    var scalesContentOnHover = true
     private var tracking: NSTrackingArea?
 
     override func updateTrackingAreas() {
@@ -54,12 +61,22 @@ private class TasteCardView: NSBox {
 
     override func mouseEntered(with event: NSEvent) {
         guard respondsToHover else { return }
-        animateHover(scale: 1.008, shadow: 0.12)
+        applyHoverAppearance(isHovered: true)
     }
 
     override func mouseExited(with event: NSEvent) {
         guard respondsToHover else { return }
-        animateHover(scale: 1, shadow: 0.04)
+        applyHoverAppearance(isHovered: false)
+    }
+
+    fileprivate func applyHoverAppearance(isHovered: Bool) {
+        animateHover(
+            scale: TasteCardHoverStyle.scale(
+                isHovered: isHovered,
+                allowsContentScale: scalesContentOnHover
+            ),
+            shadow: isHovered ? 0.12 : 0.04
+        )
     }
 
     private func animateHover(scale: CGFloat, shadow: Float) {
@@ -2697,7 +2714,7 @@ final class SettingsWindowController: NSWindowController {
                 detail: "跟随当前 Agent 与路由，用量刷新后自动更新。",
                 control: resetCountdownLabel
             )
-        ], interactive: true)
+        ], interactive: true, scalesOnHover: false)
 
         healthStack.orientation = .vertical
         healthStack.alignment = .leading
@@ -2710,7 +2727,7 @@ final class SettingsWindowController: NSWindowController {
             ),
             separator(),
             padded(healthStack, horizontal: 22, vertical: 8)
-        ], interactive: true)
+        ], interactive: true, scalesOnHover: false)
 
         let historyActions = NSStackView(views: [historyRangeControl, exportHistoryButton])
         historyActions.orientation = .horizontal
@@ -2735,7 +2752,11 @@ final class SettingsWindowController: NSWindowController {
         historyContent.spacing = 14
         historyHeader.widthAnchor.constraint(equalTo: historyContent.widthAnchor).isActive = true
         historyChart.widthAnchor.constraint(equalTo: historyContent.widthAnchor).isActive = true
-        let historyCard = card([padded(historyContent, horizontal: 22, vertical: 18)], interactive: true)
+        let historyCard = card(
+            [padded(historyContent, horizontal: 22, vertical: 18)],
+            interactive: true,
+            scalesOnHover: false
+        )
 
         return page(
             title: "监控与历史",
@@ -3035,10 +3056,15 @@ final class SettingsWindowController: NSWindowController {
         return scroll
     }
 
-    private func card(_ rows: [NSView], interactive: Bool = false) -> NSView {
+    private func card(
+        _ rows: [NSView],
+        interactive: Bool = false,
+        scalesOnHover: Bool = true
+    ) -> NSView {
         let box = TasteCardView()
         box.boxType = .custom
         box.respondsToHover = interactive
+        box.scalesContentOnHover = scalesOnHover
         box.wantsLayer = true
         box.borderColor = NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua

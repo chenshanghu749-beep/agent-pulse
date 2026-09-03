@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.3.1-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.2-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -31,6 +31,12 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse 菜单栏预览" width="100%">
 </p>
 
+## 3.3.2 更新
+
+- 修复“监控与历史”卡片悬浮时整体缩放，导致图标和文字插值模糊的问题；现在保留阴影反馈但不再放大内容。
+- 历史柱状图新增即时悬浮详情，显示日期、真实指标值与当天采样次数，空数据日期会显示“暂无采样”。
+- 悬浮柱增加清晰描边，并继续支持剩余百分比、余额、Token 与费用等不同历史指标。
+
 ## 3.3.1 更新
 
 - OpenAI 官方用量兼容 `5h` 与 `7d` 双窗口，状态栏、仪表盘、设置页、下拉菜单和桌面组件统一展示剩余用量。
@@ -45,16 +51,6 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 - 状态栏新增“当前余额”和“轮播全部”模式，可轮播官方与三方账户；切换时使用平滑淡入淡出动画，并遵循系统“减少动态效果”设置。
 - 新增 Claude CLI 与 OpenCode Agent 支持，包括安装检测、启动、提供商绑定、模型配置和 Anthropic Messages API。
 - 提供商余额缓存会同步到仪表盘、模型列表、状态栏与桌面小组件，刷新频率保持每分钟一次。
-
-## 3.2.0 更新
-
-- 新增诊断中心：集中展示 Agent、版本路径、路由模型、余额刷新、任务事件、状态监听与配置冲突，并支持复制脱敏报告。
-- Codex 路由切换升级为安全事务：切换前预检与自动备份，写入和启动后再次验证，失败时自动恢复认证与 `config.toml`，始终不修改会话数据库。
-- 扩展新版 Codex 任务事件兼容，支持识别状态长期停留，并可一键重新初始化任务监听。
-- 监控历史支持 7/30/90 天趋势、Token 与费用汇总、保留周期、清空记录、通知冷却，以及跨重启保存路由健康状态。
-- 配置快照支持名称、备注和选择恢复范围；导入前显示新增、修改、删除预览，并检查重复配置与无效 URL。
-- 模型连接检测支持倒计时、取消、时间戳和鉴权失败、模型不存在、连接超时分类；模型卡片支持键盘选择。
-- 修复深色应用主题下风车/齿轮菜单栏文字颜色错误，以及诊断中心内容被滚动容器裁剪的问题。
 
 ## 核心功能
 
@@ -91,7 +87,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-3.3.1.dmg`](dist/Agent-Pulse-3.3.1.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-3.3.2.dmg`](dist/Agent-Pulse-3.3.2.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -105,7 +101,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.1.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.2.dmg`。
 
 ## 隐私与安全
 
@@ -136,4 +132,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`3.3.1`
+当前版本：`3.3.2`

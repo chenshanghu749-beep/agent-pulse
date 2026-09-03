@@ -578,7 +578,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 #endif
 
-if CommandLine.arguments.contains("--login-status-test") {
+if CommandLine.arguments.contains("--history-chart-hover-value-test") {
+    let summary = UsageDailySummary(
+        date: Date(timeIntervalSince1970: 0),
+        minimumRemainingPercent: 59,
+        latestBalance: 12.34,
+        totalTokens: 1_234,
+        totalCost: 0.56,
+        sampleCount: 4
+    )
+    let metric = UsageHistoryChartPresentation.metric(for: [summary])
+    let text = UsageHistoryChartPresentation.hoverText(
+        for: summary,
+        metric: metric,
+        dateText: "9月3日"
+    )
+    if text == "9月3日 · 剩余 59% · 4 次采样" {
+        print("HISTORY_CHART_HOVER_VALUE_OK")
+    } else {
+        print("HISTORY_CHART_HOVER_VALUE_ERROR \(text ?? "nil")")
+        exit(EXIT_FAILURE)
+    }
+} else if CommandLine.arguments.contains("--monitoring-hover-sharpness-test") {
+    let scale = TasteCardHoverStyle.scale(isHovered: true, allowsContentScale: false)
+    let interactiveScale = TasteCardHoverStyle.scale(isHovered: true, allowsContentScale: true)
+    if abs(scale - 1) < 0.0001, abs(interactiveScale - 1.008) < 0.0001 {
+        print("MONITORING_HOVER_SHARPNESS_OK")
+    } else {
+        print("MONITORING_HOVER_SHARPNESS_ERROR scale=\(scale) interactive=\(interactiveScale)")
+        exit(EXIT_FAILURE)
+    }
+} else if CommandLine.arguments.contains("--login-status-test") {
     print("LOGIN_STATUS \(OfficialUsageClient.loginStatusDiagnostic())")
 } else if CommandLine.arguments.contains("--task-state-test") {
     let snapshot = TaskActivityReader.read()

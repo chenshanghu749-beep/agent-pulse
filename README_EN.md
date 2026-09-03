@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.3.1-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.2-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -21,6 +21,12 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
 <p align="center">
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse menu bar preview" width="100%">
 </p>
+
+## What's New in 3.3.2
+
+- Fixed Monitoring and History cards scaling their entire contents on hover, which blurred icons and text; hover shadow feedback remains without content magnification.
+- Added immediate history chart hover details with the date, actual metric value, and daily sample count, including a clear no-samples state.
+- Added a crisp outline to the hovered bar while retaining support for remaining percentage, balance, token, and cost history metrics.
 
 ## What's New in 3.3.1
 
@@ -36,16 +42,6 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
 - Added Current Balance and Rotate All menu bar modes for official and third-party accounts, with a smooth crossfade that respects macOS Reduce Motion.
 - Added Claude CLI and OpenCode Agent support, including installation detection, launching, provider binding, model configuration, and Anthropic Messages API.
 - Provider balance caching now stays synchronized across the dashboard, model list, menu bar, and desktop widget while retaining the one-minute refresh interval.
-
-## What's New in 3.2.0
-
-- Added Diagnostics Center for Agent/version paths, route and model details, balance refreshes, task events, listener state, configuration conflicts, and copyable redacted reports.
-- Upgraded Codex route switching to a recoverable transaction with preflight validation, automatic snapshots, post-write and post-launch verification, and rollback of authentication and `config.toml` without touching session databases.
-- Expanded compatibility with newer Codex task event formats, stale-state diagnosis, and one-click task listener reinitialization.
-- Monitoring now supports 7/30/90-day trends, token and cost totals, configurable retention, history clearing, notification cooldowns, and persisted route health.
-- Configuration snapshots support names, notes, and selective restore; imports preview additions, changes, and deletions while validating duplicate profiles and invalid URLs.
-- Model tests now support countdowns, cancellation, timestamps, classified authentication/model/timeout errors, and keyboard model selection.
-- Fixed incorrect pinwheel/gear menu bar text colors under app dark mode and diagnostic content being clipped by its scroll container.
 
 ## Quick Install
 
@@ -90,7 +86,7 @@ The menu bar icon continuously reflects the current task status. A three-color t
 
 ## Manual Installation
 
-Download [`Agent-Pulse-3.3.1.dmg`](dist/Agent-Pulse-3.3.1.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
+Download [`Agent-Pulse-3.3.2.dmg`](dist/Agent-Pulse-3.3.2.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
 
 If macOS blocks the first launch, right-click the app in Finder and select `Open`.
 
@@ -104,7 +100,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.3.1.dmg`.
+The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.3.2.dmg`.
 
 ## Privacy and Security
 
@@ -130,4 +126,4 @@ If Agent Pulse is useful to you, you can support its ongoing maintenance through
   <img src="docs/assets/wechat-pay.jpg" alt="WeChat payment QR code" width="320">
 </p>
 
-Current version: `3.3.1`
+Current version: `3.3.2`
