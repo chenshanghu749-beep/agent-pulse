@@ -578,7 +578,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 #endif
 
-if CommandLine.arguments.contains("--history-chart-hover-value-test") {
+if CommandLine.arguments.contains("--status-layout-overlap-test") {
+    let compositeForEveryStyle = StatusIconStyle.allCases.allSatisfy {
+        StatusBarLayoutPolicy.usesCompositeImageInCurrentMode(style: $0)
+    }
+    let normalWidthIsVariable = !StatusBarLayoutPolicy.usesFixedWidthAfterRecovery(
+        balanceOverlayVisible: false
+    )
+    let rotationWidthIsFixed = StatusBarLayoutPolicy.usesFixedWidthAfterRecovery(
+        balanceOverlayVisible: true
+    )
+    let icon = StatusIconRenderer.image(style: .trafficLight, active: .green)
+    let title = "官方 5h 99% · 7d 59%"
+    let composite = StatusIconRenderer.statusItemImage(
+        style: .trafficLight,
+        active: .green,
+        frame: 0,
+        title: title,
+        font: .systemFont(ofSize: 12, weight: .medium)
+    )
+    let transitioningIcon = StatusIconRenderer.blended(
+        from: StatusIconRenderer.image(style: .trafficLight, active: .red),
+        to: icon,
+        progress: 0.5
+    )
+    let transitionComposite = StatusIconRenderer.statusItemImage(
+        style: .trafficLight,
+        active: .green,
+        frame: 0,
+        title: title,
+        font: .systemFont(ofSize: 12, weight: .medium),
+        iconOverride: transitioningIcon
+    )
+    let compositeHasSeparateTextSpace = composite.size.width > icon.size.width + 4
+        && transitionComposite.size.width > transitioningIcon.size.width + 4
+    guard compositeForEveryStyle, normalWidthIsVariable, rotationWidthIsFixed,
+          compositeHasSeparateTextSpace else {
+        print("STATUS_LAYOUT_OVERLAP_ERROR composite=\(compositeForEveryStyle) normalVariable=\(normalWidthIsVariable) rotationFixed=\(rotationWidthIsFixed)")
+        exit(EXIT_FAILURE)
+    }
+    print("STATUS_LAYOUT_OVERLAP_OK")
+} else if CommandLine.arguments.contains("--history-chart-hover-value-test") {
     let summary = UsageDailySummary(
         date: Date(timeIntervalSince1970: 0),
         minimumRemainingPercent: 59,

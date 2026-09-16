@@ -33,6 +33,18 @@ enum StatusBalanceLayout {
     }
 }
 
+enum StatusBarLayoutPolicy {
+    static func usesCompositeImageInCurrentMode(style: StatusIconStyle) -> Bool {
+        // Keep icon and title in one image. AppKit may independently reflow a
+        // native title and an overlay icon after wake or a menu-bar resize.
+        true
+    }
+
+    static func usesFixedWidthAfterRecovery(balanceOverlayVisible: Bool) -> Bool {
+        balanceOverlayVisible
+    }
+}
+
 enum StatusBalanceFormatter {
     private static let pattern = try! NSRegularExpression(
         pattern: #"^([¥￥$€£₽₩]?)([-+]?\d[\d,]*(?:\.\d+)?)(%?)$"#

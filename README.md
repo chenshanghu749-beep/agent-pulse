@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.3.2-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.3-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -31,6 +31,11 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse 菜单栏预览" width="100%">
 </p>
 
+## 3.3.3 更新
+
+- 修复 macOS 锁屏唤醒、菜单栏重新布局或余额轮播切换后，状态图标与提供商名称、余额偶发重叠的问题。
+- 图标与文字现在作为统一内容渲染，并在显示模式变化时主动重建布局，保持间距稳定。
+
 ## 3.3.2 更新
 
 - 修复“监控与历史”卡片悬浮时整体缩放，导致图标和文字插值模糊的问题；现在保留阴影反馈但不再放大内容。
@@ -43,14 +48,6 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 - 状态栏官方用量使用 `官方 5h 99% · 7d 59%` 紧凑格式，并扩大完整文字区域，避免第二个窗口被裁切。
 - 修复 Cursor 1.x 部分账户把小数百分比错误按比例换算，导致剩余用量从 99% 误显示为 59% 的问题。
 - 官方用量监控与阈值提醒改为跟随当前限制更紧的窗口，并让余额轮播无需打开仪表盘即可及时刷新。
-
-## 3.3.0 更新
-
-- 仪表盘新增官方与三方提供商余额卡片，使用双列块状布局，只展示提供商与账户余额，并支持直接添加或删除三方配置。
-- macOS 桌面小组件升级：小号组件展示当前提供商余额，中号组件以卡片形式展示多个账户余额。
-- 状态栏新增“当前余额”和“轮播全部”模式，可轮播官方与三方账户；切换时使用平滑淡入淡出动画，并遵循系统“减少动态效果”设置。
-- 新增 Claude CLI 与 OpenCode Agent 支持，包括安装检测、启动、提供商绑定、模型配置和 Anthropic Messages API。
-- 提供商余额缓存会同步到仪表盘、模型列表、状态栏与桌面小组件，刷新频率保持每分钟一次。
 
 ## 核心功能
 
@@ -87,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-3.3.2.dmg`](dist/Agent-Pulse-3.3.2.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-3.3.3.dmg`](dist/Agent-Pulse-3.3.3.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -101,7 +98,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.2.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.3.dmg`。
 
 ## 隐私与安全
 
@@ -132,4 +129,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`3.3.2`
+当前版本：`3.3.3`

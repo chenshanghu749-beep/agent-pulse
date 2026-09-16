@@ -180,6 +180,7 @@ enum StatusIconRenderer {
         frame: Int,
         title: String,
         font: NSFont,
+        iconOverride: NSImage? = nil,
         appearance requestedAppearance: NSAppearance? = nil
     ) -> NSImage {
         let phase = animationPhase(style: style, active: active, frame: frame)
@@ -189,9 +190,10 @@ enum StatusIconRenderer {
         let appearance = appearanceKey(for: effectiveAppearance)
         let fontName = font.fontDescriptor.postscriptName ?? font.fontName
         let cacheKey = "status-item|\(style.rawValue)|\(String(describing: active))|\(phase)|\(title)|\(fontName)|\(font.pointSize)|\(appearance)" as NSString
-        if let cached = statusItemImageCache.object(forKey: cacheKey) { return cached }
+        if iconOverride == nil,
+           let cached = statusItemImageCache.object(forKey: cacheKey) { return cached }
 
-        let icon = image(style: style, active: active, frame: frame, appearance: effectiveAppearance)
+        let icon = iconOverride ?? image(style: style, active: active, frame: frame, appearance: effectiveAppearance)
         let text = statusTextImage(title: title, font: font, appearance: appearance)
         let spacing: CGFloat = title.isEmpty ? 0 : 4
         let width = ceil(icon.size.width + spacing + text.size.width)
@@ -213,7 +215,7 @@ enum StatusIconRenderer {
         }
         composite.isTemplate = false
         composite.accessibilityDescription = title
-        statusItemImageCache.setObject(composite, forKey: cacheKey)
+        if iconOverride == nil { statusItemImageCache.setObject(composite, forKey: cacheKey) }
         return composite
     }
 

@@ -511,7 +511,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         renderStatusButton()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
             guard let self, let button = self.statusItem?.button else { return }
-            self.statusItem.length = self.rotatingBalanceStatusItemWidth
+            self.statusItem.length = StatusBarLayoutPolicy.usesFixedWidthAfterRecovery(
+                balanceOverlayVisible: !self.statusBalanceOverlayView.isHidden
+            ) ? self.rotatingBalanceStatusItemWidth : NSStatusItem.variableLength
             button.needsLayout = true
             button.layoutSubtreeIfNeeded()
             self.layoutStatusIconOverlay(in: button)
@@ -820,6 +822,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ) {
         let title = "\(entry.name) · \(value)"
         let titleChanged = title != statusTitleText
+        let wasHidden = statusBalanceOverlayView.isHidden
         statusTitleText = title
         button.toolTip = toolTip
         button.setAccessibilityLabel(title)
@@ -839,7 +842,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self, let button else { return }
             self.layoutStatusBalanceOverlay(in: button)
         }
-        if titleChanged || statusIconStyle.usesCompositeStatusItemImage {
+        if titleChanged || wasHidden || statusIconStyle.usesCompositeStatusItemImage {
             lastStatusRenderKey = nil
             renderStatusButton()
         }
@@ -847,15 +850,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applyStatusTitle(_ title: String, toolTip: String, to button: NSStatusBarButton) {
         let titleChanged = title != statusTitleText
+        let wasRotating = !statusBalanceOverlayView.isHidden
         statusTitleText = title
         button.toolTip = toolTip
         button.setAccessibilityLabel(title)
         statusBalanceOverlayView.isHidden = true
         statusItem.length = NSStatusItem.variableLength
         button.alignment = .center
-        if statusIconStyle.usesCompositeStatusItemImage {
+        if StatusBarLayoutPolicy.usesCompositeImageInCurrentMode(style: statusIconStyle) {
             button.title = ""
-            if titleChanged {
+            if titleChanged || wasRotating || !isUsingNativeStatusImage {
                 lastStatusRenderKey = nil
                 renderStatusButton()
             }
@@ -951,13 +955,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 progress: CGFloat(transitionStep) / 20
             )
         }
-        displayStatusImage(statusImage, in: button)
+        displayStatusImage(statusImage, in: button, usesBlendedIcon: progress < 1)
         button.toolTip = toolTip
         syncIconAnimationTimer()
     }
 
-    private func displayStatusImage(_ image: NSImage, in button: NSStatusBarButton) {
-        if StatusBalanceDisplayPreference.selected == .rotateAll {
+    private func displayStatusImage(
+        _ image: NSImage,
+        in button: NSStatusBarButton,
+        usesBlendedIcon: Bool
+    ) {
+        if !statusBalanceOverlayView.isHidden {
             button.title = ""
             statusIconOverlayView?.isHidden = false
             let fittedSize = fittedStatusIconSize(for: image.size)
@@ -976,13 +984,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             layoutStatusBalanceOverlay(in: button)
             return
         }
-        if statusIconStyle.usesCompositeStatusItemImage {
+        if StatusBarLayoutPolicy.usesCompositeImageInCurrentMode(style: statusIconStyle) {
             let composite = StatusIconRenderer.statusItemImage(
                 style: statusIconStyle,
                 active: targetSignal,
                 frame: animationFrame,
                 title: statusTitleText,
                 font: button.font ?? .systemFont(ofSize: 12, weight: .medium),
+                iconOverride: usesBlendedIcon && !statusIconStyle.usesCompositeStatusItemImage
+                    ? image : nil,
                 appearance: button.effectiveAppearance
             )
             isUsingNativeStatusImage = true
@@ -1030,7 +1040,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func layoutStatusIconOverlay(in button: NSStatusBarButton) {
         guard let overlay = statusIconOverlayView else { return }
         button.layoutSubtreeIfNeeded()
-        if StatusBalanceDisplayPreference.selected == .rotateAll {
+        if !statusBalanceOverlayView.isHidden {
             let size = statusIconPlaceholderSize == .zero
                 ? NSSize(width: 18, height: 18)
                 : statusIconPlaceholderSize

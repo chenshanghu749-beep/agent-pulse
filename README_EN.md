@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.3.2-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.3-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -21,6 +21,11 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
 <p align="center">
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse menu bar preview" width="100%">
 </p>
+
+## What's New in 3.3.3
+
+- Fixed an intermittent overlap between the status icon, provider name, and balance after wake, menu-bar relayout, or balance rotation.
+- The icon and text are now rendered as one stable status item and rebuilt whenever the display mode changes.
 
 ## What's New in 3.3.2
 
@@ -34,14 +39,6 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
 - The menu bar uses the compact `官方 5h 99% · 7d 59%` format with enough reserved width to prevent the second window from being clipped.
 - Fixed Cursor 1.x fractional percentage values being misread as ratios, which could show 59% remaining when Cursor reported 99%.
 - Official usage monitoring and alerts now follow the tighter active window, while balance rotation refreshes without requiring the dashboard to be opened.
-
-## What's New in 3.3.0
-
-- Added a two-column dashboard of official and third-party provider balance cards, showing provider-level account balances without model details and supporting direct add/delete actions for third-party profiles.
-- Upgraded the macOS desktop widget: the small widget shows the current provider balance, while the medium widget displays multiple account balances as compact cards.
-- Added Current Balance and Rotate All menu bar modes for official and third-party accounts, with a smooth crossfade that respects macOS Reduce Motion.
-- Added Claude CLI and OpenCode Agent support, including installation detection, launching, provider binding, model configuration, and Anthropic Messages API.
-- Provider balance caching now stays synchronized across the dashboard, model list, menu bar, and desktop widget while retaining the one-minute refresh interval.
 
 ## Quick Install
 
@@ -86,7 +83,7 @@ The menu bar icon continuously reflects the current task status. A three-color t
 
 ## Manual Installation
 
-Download [`Agent-Pulse-3.3.2.dmg`](dist/Agent-Pulse-3.3.2.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
+Download [`Agent-Pulse-3.3.3.dmg`](dist/Agent-Pulse-3.3.3.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
 
 If macOS blocks the first launch, right-click the app in Finder and select `Open`.
 
@@ -100,7 +97,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.3.2.dmg`.
+The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.3.3.dmg`.
 
 ## Privacy and Security
 
@@ -126,4 +123,4 @@ If Agent Pulse is useful to you, you can support its ongoing maintenance through
   <img src="docs/assets/wechat-pay.jpg" alt="WeChat payment QR code" width="320">
 </p>
 
-Current version: `3.3.2`
+Current version: `3.3.3`
