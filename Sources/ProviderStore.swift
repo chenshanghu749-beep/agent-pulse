@@ -236,18 +236,17 @@ private struct ProviderDatabase: Codable {
     var selectedProviderID: String?
     var officialModel: String?
     var officialModelCatalogJSON: String?
+    var nextProviderSequence: Int?
 }
 
 enum ProviderStoreError: LocalizedError {
     case cannotSave(String)
     case duplicateID
-    case duplicateName(String)
 
     var errorDescription: String? {
         switch self {
         case let .cannotSave(message): return "无法保存提供商配置：\(message)"
         case .duplicateID: return "提供商内部标识重复，请删除异常配置后重新添加。"
-        case let .duplicateName(name): return "路由名称“\(name)”已存在，请使用不同的名称。"
         }
     }
 }
@@ -274,17 +273,22 @@ enum ProviderStore {
     static func officialModelCatalogJSON() -> String? { load().officialModelCatalogJSON }
 
     static func saveProviders(_ providers: [ProviderProfile], selectedProviderID: String?) throws {
+        try validateProfiles(providers)
+        var database = load()
+        database.providers = providers
+        database.selectedProviderID = selectedProviderID
+        database.nextProviderSequence = max(
+            database.nextProviderSequence ?? 1,
+            inferredNextSequence(from: providers)
+        )
+        try save(database)
+    }
+
+    static func validateProfiles(_ providers: [ProviderProfile]) throws {
         let normalizedIDs = providers.map { $0.id.lowercased() }
         guard Set(normalizedIDs).count == normalizedIDs.count else {
             throw ProviderStoreError.duplicateID
         }
-        if let collision = firstDuplicateName(in: providers) {
-            throw ProviderStoreError.duplicateName(collision)
-        }
-        var database = load()
-        database.providers = providers
-        database.selectedProviderID = selectedProviderID
-        try save(database)
     }
 
     static func normalizedName(_ name: String) -> String {
@@ -295,20 +299,6 @@ enum ProviderStore {
             )
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
-    }
-
-    static func hasNameCollision(
-        _ name: String,
-        excluding providerID: String,
-        in providers: [ProviderProfile],
-        agent: AgentKind? = nil
-    ) -> Bool {
-        let candidate = normalizedName(name)
-        return providers.contains { provider in
-            provider.id != providerID
-                && normalizedName(provider.name) == candidate
-                && (agent.map { provider.supports($0) } ?? true)
-        }
     }
 
     static func popupTitles(for providers: [ProviderProfile]) -> [String] {
@@ -332,12 +322,35 @@ enum ProviderStore {
     }
 
     static func makeProviderID(existing providers: [ProviderProfile]) -> String {
-        let existingIDs = Set(providers.map { $0.id.lowercased() })
-        var candidate: String
-        repeat {
-            candidate = UUID().uuidString.lowercased()
-        } while existingIDs.contains(candidate)
+        "provider-\(inferredNextSequence(from: providers))"
+    }
+
+    /// Reserves a monotonically increasing local identifier. Display names are
+    /// intentionally not part of identity, so multiple profiles can share the
+    /// same user-facing configuration name without overwriting each other.
+    static func reserveProviderID() throws -> String {
+        var database = load()
+        let existingIDs = Set(database.providers.map { $0.id.lowercased() })
+        var sequence = max(
+            database.nextProviderSequence ?? 1,
+            inferredNextSequence(from: database.providers)
+        )
+        var candidate = "provider-\(sequence)"
+        while existingIDs.contains(candidate.lowercased()) {
+            sequence += 1
+            candidate = "provider-\(sequence)"
+        }
+        database.nextProviderSequence = sequence + 1
+        try save(database)
         return candidate
+    }
+
+    static func binding(_ provider: ProviderProfile, to agent: AgentKind) -> ProviderProfile {
+        var result = provider
+        var agents = provider.boundAgents
+        agents.insert(agent)
+        result.agents = AgentKind.allCases.filter(agents.contains)
+        return result
     }
 
     static func setSelectedProviderID(_ id: String?) throws {
@@ -365,22 +378,20 @@ enum ProviderStore {
                 providers: [.codeAPI],
                 selectedProviderID: "codeapi",
                 officialModel: nil,
-                officialModelCatalogJSON: nil
+                officialModelCatalogJSON: nil,
+                nextProviderSequence: 1
             )
         }
         return database
     }
 
-    private static func firstDuplicateName(in providers: [ProviderProfile]) -> String? {
-        for (index, provider) in providers.enumerated() {
-            for other in providers.dropFirst(index + 1) {
-                if normalizedName(provider.name) == normalizedName(other.name),
-                   !provider.boundAgents.isDisjoint(with: other.boundAgents) {
-                    return other.name
-                }
-            }
-        }
-        return nil
+    private static func inferredNextSequence(from providers: [ProviderProfile]) -> Int {
+        let highest = providers.compactMap { provider -> Int? in
+            let prefix = "provider-"
+            guard provider.id.lowercased().hasPrefix(prefix) else { return nil }
+            return Int(provider.id.dropFirst(prefix.count))
+        }.max() ?? 0
+        return highest + 1
     }
 
     private static func save(_ database: ProviderDatabase) throws {

@@ -997,6 +997,26 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
     )
     precondition(ProviderVendor.infer(from: "https://api.x.ai/v1") == .xAI)
     precondition(ProviderVendor.infer(from: "https://api.example.com/v1") == .custom)
+    precondition(
+        try! ProviderConnectionTester.endpointURL(profile: .codeAPI).absoluteString
+            == "https://codeapi.nexita.net/v1/responses"
+    )
+    precondition(
+        try! ProviderConnectionTester.endpointURL(profile: ProviderProfile(
+            id: "codeapi-v1-test",
+            name: "CodeAPI",
+            baseURL: "https://codeapi.nexita.net/v1",
+            model: "test-model"
+        )).absoluteString == "https://codeapi.nexita.net/v1/responses"
+    )
+    precondition(
+        try! ProviderConnectionTester.endpointURL(profile: ProviderProfile(
+            id: "codeapi-responses-test",
+            name: "CodeAPI",
+            baseURL: "https://codeapi.nexita.net/v1/responses",
+            model: "test-model"
+        )).absoluteString == "https://codeapi.nexita.net/v1/responses"
+    )
     let custom = RouteConfigManager.render(sample, route: .provider(provider.id), profile: provider)
     precondition(custom.hasPrefix("model_provider = \"openai\""))
     precondition(custom.contains("model = \"custom-model\""))
@@ -1025,14 +1045,15 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
         baseURL: "https://second.example.com/v1",
         model: "second-model"
     )
-    precondition(ProviderStore.hasNameCollision(
-        "  TEST \"PROVIDER\"  ",
-        excluding: sameNameProvider.id,
-        in: [provider]
-    ))
+    try! ProviderStore.validateProfiles([provider, sameNameProvider])
     let duplicateTitles = ProviderStore.popupTitles(for: [provider, sameNameProvider])
     precondition(duplicateTitles.count == 2)
     precondition(duplicateTitles[0] != duplicateTitles[1])
+    precondition(ProviderStore.makeProviderID(existing: [
+        ProviderProfile(id: "provider-2", name: "A", baseURL: "https://a.example.com", model: "a"),
+        ProviderProfile(id: "provider-7", name: "B", baseURL: "https://b.example.com", model: "b"),
+        provider
+    ]) == "provider-8")
 
     let cursorOnlyProvider = ProviderProfile(
         id: "cursor-only-provider",
@@ -1043,19 +1064,11 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
     )
     precondition(cursorOnlyProvider.supports(.cursor))
     precondition(!cursorOnlyProvider.supports(.codex))
+    let reboundProvider = ProviderStore.binding(cursorOnlyProvider, to: .hermes)
+    precondition(reboundProvider.supports(.cursor))
+    precondition(reboundProvider.supports(.hermes))
+    precondition(!reboundProvider.supports(.codex))
     precondition(provider.supports(.codex) && provider.supports(.cursor))
-    precondition(!ProviderStore.hasNameCollision(
-        provider.name,
-        excluding: cursorOnlyProvider.id,
-        in: [ProviderProfile(
-            id: provider.id,
-            name: provider.name,
-            baseURL: provider.baseURL,
-            model: provider.model,
-            agents: [.codex]
-        )],
-        agent: .cursor
-    ))
     let sameNameConfig = RouteConfigManager.render(
         sample,
         route: .provider(sameNameProvider.id),
@@ -1073,6 +1086,8 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
     precondition(sameNameConfig.contains(
         "[model_providers.codeapi_status_provider_same-name-provider]"
     ))
+    precondition(sameNameConfig.contains("[model_providers.openai]"))
+    precondition(sameNameConfig.contains("supports_websockets = false"))
     try! RouteConfigManager.validate(sameNameConfig)
 
     let official = RouteConfigManager.render(
@@ -1204,7 +1219,7 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
         in: legacyNamedProviderConfig,
         profiles: [provider],
         selectedProviderID: provider.id
-    ) == false)
+    ))
     precondition(!RouteConfigManager.needsUpgradeReconciliation(
         in: custom,
         profiles: [provider],
