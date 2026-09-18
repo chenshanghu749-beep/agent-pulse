@@ -745,8 +745,6 @@ final class SettingsWindowController: NSWindowController {
     private let pageHost = NSView()
     private let modelListStack = NSStackView()
     private let addProviderButton = TasteActionButton()
-    private let reusableProviderPopup = TastePopUpButton()
-    private let bindExistingProviderButton = TasteActionButton(title: "绑定", target: nil, action: nil)
     private let editorAgentLabel = NSTextField(labelWithString: "")
     private let dashboardAgentValue = NSTextField(labelWithString: "—")
     private let dashboardRouteValue = NSTextField(labelWithString: "—")
@@ -850,7 +848,6 @@ final class SettingsWindowController: NSWindowController {
     private weak var codexRouteCard: NSView?
     private weak var cursorRouteCard: NSView?
     private weak var modelProviderCard: NSView?
-    private weak var reusableProviderCard: NSView?
 
     init(appDelegate: AppDelegate) {
         self.appDelegate = appDelegate
@@ -1045,11 +1042,6 @@ final class SettingsWindowController: NSWindowController {
         routeProviderPopup.target = self
         routeProviderPopup.action = #selector(routeProviderChanged)
         routeProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
-        reusableProviderPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
-        bindExistingProviderButton.target = self
-        bindExistingProviderButton.action = #selector(bindExistingProvider)
-        bindExistingProviderButton.role = .secondary
-        bindExistingProviderButton.heightAnchor.constraint(equalToConstant: 34).isActive = true
         modelProviderField.placeholderString = "openai"
         modelProviderField.widthAnchor.constraint(equalToConstant: 150).isActive = true
         modelProviderField.toolTip = "Codex config.toml 的顶层 model_provider"
@@ -1684,23 +1676,9 @@ final class SettingsWindowController: NSWindowController {
     private func buildRoutePage() -> NSView {
         let agentRow = settingRow(
             title: "Agent",
-            detail: "模型列表会随 Agent 切换；可直接绑定之前已经配置好的提供商与模型。",
+            detail: "模型列表会随 Agent 切换，每个配置只出现在绑定的 Agent 下。",
             control: agentControl
         )
-
-        let reusableProviderActions = NSStackView(
-            views: [reusableProviderPopup, bindExistingProviderButton]
-        )
-        reusableProviderActions.orientation = .horizontal
-        reusableProviderActions.alignment = .centerY
-        reusableProviderActions.spacing = 8
-        let reusableProviderRow = settingRow(
-            title: "绑定已有模型",
-            detail: "复用已保存的提供商与模型；绑定前会实际测试模型是否可用。",
-            control: reusableProviderActions
-        )
-        let reusableProviderCard = card([reusableProviderRow], interactive: true)
-        self.reusableProviderCard = reusableProviderCard
 
         let document = FlippedDocumentView()
         document.translatesAutoresizingMaskIntoConstraints = false
@@ -1742,7 +1720,6 @@ final class SettingsWindowController: NSWindowController {
             headerAccessory: addProviderButton,
             cards: [
                 card([agentRow], interactive: true),
-                reusableProviderCard,
                 modelProviderCard,
                 scroll
             ]
@@ -1762,7 +1739,6 @@ final class SettingsWindowController: NSWindowController {
         let agent = selectedAgent()
         modelProviderCard?.isHidden = !agent.supportsModelProviderConfiguration
         addProviderButton.isHidden = agent == .cursor
-        reloadReusableProviderPopup(for: agent)
         let official = makeModelRow(provider: nil, agent: agent)
         modelListStack.addArrangedSubview(official)
         official.widthAnchor.constraint(equalTo: modelListStack.widthAnchor).isActive = true
@@ -1776,9 +1752,8 @@ final class SettingsWindowController: NSWindowController {
         }
 
         let visibleProviders = providers.filter { $0.supports(agent) }
-        let visibleTitles = ProviderStore.popupTitles(for: visibleProviders)
-        for (provider, title) in zip(visibleProviders, visibleTitles) {
-            let row = makeModelRow(provider: provider, agent: agent, displayName: title)
+        for provider in visibleProviders {
+            let row = makeModelRow(provider: provider, agent: agent)
             modelListStack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: modelListStack.widthAnchor).isActive = true
         }
@@ -1849,11 +1824,7 @@ final class SettingsWindowController: NSWindowController {
         return card
     }
 
-    private func makeModelRow(
-        provider: ProviderProfile?,
-        agent: AgentKind,
-        displayName: String? = nil
-    ) -> TasteCardView {
+    private func makeModelRow(provider: ProviderProfile?, agent: AgentKind) -> TasteCardView {
         let key = provider?.id ?? "official"
         let row = ModelBannerView()
         row.boxType = .custom
@@ -1875,7 +1846,7 @@ final class SettingsWindowController: NSWindowController {
 
         let icon = routeIconView(provider: provider, agent: agent)
 
-        let name = NSTextField(labelWithString: displayName ?? provider?.name ?? officialProviderName(for: agent))
+        let name = NSTextField(labelWithString: provider?.name ?? officialProviderName(for: agent))
         name.font = displayFont(size: 14, weight: .semibold)
         name.lineBreakMode = .byTruncatingTail
         let model = NSTextField(labelWithString: provider?.model ?? officialModelDescription(for: agent))
@@ -2284,66 +2255,6 @@ final class SettingsWindowController: NSWindowController {
         reloadProviderPopups()
         reloadModelList()
         statusLabel.stringValue = "已选择模型，点击“应用并打开”使配置生效。"
-    }
-
-    private func reloadReusableProviderPopup(for agent: AgentKind) {
-        reusableProviderPopup.removeAllItems()
-        let candidates = providers.filter { provider in
-            !provider.supports(agent)
-                && agent != .cursor
-                && CredentialStore.load(providerID: provider.id)?.isEmpty == false
-        }
-        let titles = ProviderStore.popupTitles(for: candidates)
-        for (provider, title) in zip(candidates, titles) {
-            addProviderItem(title: "\(title) · \(provider.model)", providerID: provider.id, to: reusableProviderPopup)
-        }
-        reusableProviderCard?.isHidden = candidates.isEmpty || agent == .cursor
-        bindExistingProviderButton.isEnabled = !candidates.isEmpty
-    }
-
-    @objc private func bindExistingProvider() {
-        let agent = selectedAgent()
-        guard agent != .cursor,
-              let id = selectedProviderID(from: reusableProviderPopup),
-              let profile = providers.first(where: { $0.id == id }),
-              let key = CredentialStore.load(providerID: id), !key.isEmpty else {
-            showError("没有可绑定的提供商配置。")
-            return
-        }
-        bindExistingProviderButton.isEnabled = false
-        statusLabel.stringValue = "正在测试 \(profile.name) · \(profile.model)…"
-        Task { [weak self] in
-            guard let self else { return }
-            defer {
-                self.bindExistingProviderButton.isEnabled = self.reusableProviderPopup.numberOfItems > 0
-            }
-            do {
-                let snapshot = await RouteHealthChecker.check(profile: profile, key: key)
-                guard let index = providers.firstIndex(where: { $0.id == id }),
-                      providers[index] == profile,
-                      CredentialStore.load(providerID: id) == key else {
-                    throw SettingsError.configurationChanged
-                }
-                RouteHealthStore.save(snapshot)
-                guard snapshot.state == .healthy else {
-                    throw RouteSwitchTransactionError.modelUnavailable(profile.name, snapshot.message)
-                }
-                var updatedProviders = providers
-                updatedProviders[index] = ProviderStore.binding(updatedProviders[index], to: agent)
-                try ProviderStore.saveProviders(
-                    updatedProviders,
-                    selectedProviderID: ProviderStore.selectedProviderID()
-                )
-                providers = updatedProviders
-                selectedProviderID = id
-                if selectedAgent() == agent && agent == .codex { routeControl.selectedSegment = 1 }
-                reloadProviderPopups()
-                reloadModelList()
-                showSuccess("已将 \(profile.name) · \(profile.model) 绑定到 \(agent.displayName)。")
-            } catch {
-                showError(error.localizedDescription)
-            }
-        }
     }
 
     @objc private func testModelRow(_ sender: ProviderActionButton) {
@@ -4333,12 +4244,7 @@ final class SettingsWindowController: NSWindowController {
     }
 
     @objc private func addProvider() {
-        do {
-            selectedProviderID = try ProviderStore.reserveProviderID()
-        } catch {
-            showError(error.localizedDescription)
-            return
-        }
+        selectedProviderID = ProviderStore.makeProviderID(existing: providers)
         reloadProviderPopups()
         providerPopup.insertItem(withTitle: "新提供商", at: 0)
         providerPopup.item(at: 0)?.representedObject = selectedProviderID
@@ -4495,6 +4401,14 @@ final class SettingsWindowController: NSWindowController {
         let model = modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !model.isEmpty, !key.isEmpty else { throw SettingsError.incomplete }
+        if ProviderStore.hasNameCollision(
+            name,
+            excluding: id,
+            in: providers,
+            agent: selectedAgent()
+        ) {
+            throw SettingsError.duplicateName(name)
+        }
         guard let url = URL(string: baseURL), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
             throw SettingsError.invalidURL
         }
@@ -4560,10 +4474,9 @@ final class SettingsWindowController: NSWindowController {
                               $0.id == id && $0.supports(.codex)
                           }) else { throw SettingsError.noProvider }
                     route = .provider(profile.id)
-                    statusLabel.stringValue = "正在测试 \(profile.name) · \(profile.model)…"
-                    try await RouteSwitchTransaction.verifyModelAvailability(route)
                     if profile.isCodeAPI, let key = CredentialStore.load(providerID: profile.id) {
-                        usage = try? await CodeAPIClient.fetch(key: key)
+                        statusLabel.stringValue = "正在验证 CodeAPI Key…"
+                        usage = try await CodeAPIClient.fetch(key: key)
                     }
                 } else {
                     route = .official
@@ -4668,9 +4581,6 @@ final class SettingsWindowController: NSWindowController {
                     guard let key = CredentialStore.load(providerID: id), !key.isEmpty else {
                         throw SettingsError.missingCredential
                     }
-                    statusLabel.stringValue = "正在测试 \(profile.name) · \(profile.model)…"
-                    _ = try await ProviderConnectionTester.test(profile: profile, key: key)
-                    statusLabel.stringValue = "正在更新 Hermes 模型配置…"
                     try HermesIntegration.apply(profile: profile, apiKey: key)
                     HermesPreference.providerID = id
                 } else {
@@ -4704,12 +4614,9 @@ final class SettingsWindowController: NSWindowController {
                     guard let profile = providers.first(where: {
                         $0.id == id && $0.supports(agent)
                     }) else { throw SettingsError.noProvider }
-                    guard let key = CredentialStore.load(providerID: id), !key.isEmpty else {
+                    guard CredentialStore.load(providerID: id)?.isEmpty == false else {
                         throw SettingsError.missingCredential
                     }
-                    statusLabel.stringValue = "正在测试 \(profile.name) · \(profile.model)…"
-                    _ = try await ProviderConnectionTester.test(profile: profile, key: key)
-                    statusLabel.stringValue = "正在更新 \(agent.displayName) 配置…"
                     if agent == .claude {
                         try ClaudeCodeIntegration.apply(profile: profile)
                     } else {
@@ -4758,18 +4665,18 @@ private enum SettingsError: LocalizedError {
     case noProvider
     case incomplete
     case invalidURL
+    case duplicateName(String)
     case missingCredential
     case officialNotLoggedIn
-    case configurationChanged
 
     var errorDescription: String? {
         switch self {
         case .noProvider: return "请先新增一个第三方提供商。"
         case .incomplete: return "请完整填写名称、Base URL、模型 ID 和 API Key。"
         case .invalidURL: return "Base URL 必须是有效的 http 或 https 地址。"
+        case let .duplicateName(name): return "路由名称“\(name)”已存在，请换一个名称。"
         case .missingCredential: return "该提供商尚未保存 API Key。"
         case .officialNotLoggedIn: return "官方账号尚未登录。"
-        case .configurationChanged: return "检测期间提供商配置已变化，请重新绑定。"
         }
     }
 }

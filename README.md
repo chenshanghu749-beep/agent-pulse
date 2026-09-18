@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.3.4-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.3-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -30,12 +30,6 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 <p align="center">
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse 菜单栏预览" width="100%">
 </p>
-
-## 3.3.4 更新
-
-- 允许同名提供商共存，内部改用自动递增 ID 区分配置，避免同名路由互相覆盖。
-- 路由切换、Agent 配置和已有模型绑定前会实际请求模型；测试失败时保留当前配置，不会切换或绑定。
-- CodeAPI 统一通过模型请求验证可用性，并补充已有提供商绑定入口。
 
 ## 3.3.3 更新
 
@@ -90,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-3.3.4.dmg`](dist/Agent-Pulse-3.3.4.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-3.3.3.dmg`](dist/Agent-Pulse-3.3.3.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -104,7 +98,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.4.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.3.dmg`。
 
 ## 隐私与安全
 
@@ -135,4 +129,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`3.3.4`
+当前版本：`3.3.3`

@@ -175,23 +175,12 @@ enum RouteConfigManager {
         if profiles.contains(where: { $0.id == "codeapi" || $0.isCodeAPI }) {
             requiredIDs.append("codeapi")
         }
-        if case .provider = detectedRoute(
-            in: content,
-            profiles: profiles,
-            selectedProviderID: selectedProviderID
-        ), let activeProviderID = topLevelProvider(in: content) {
-            requiredIDs.append(activeProviderID)
-        }
-        requiredIDs = Array(Set(requiredIDs.map { $0.lowercased() }))
         let missingManagedProvider = requiredIDs.contains {
             !content.contains("[model_providers.\($0)]")
         }
-        let websocketTransportStillEnabled = requiredIDs.contains {
-            providerTable(in: content, id: $0)?.contains("supports_websockets = false") != true
-        }
         // A non-openai model_provider may be intentional and is exposed in
         // settings. Never rewrite it merely because the selected route changed.
-        return legacyCredential || missingManagedProvider || websocketTransportStillEnabled
+        return legacyCredential || missingManagedProvider
     }
 
     static func detectedRoute(
@@ -325,7 +314,6 @@ enum RouteConfigManager {
         modelProvider: String? = nil
     ) -> String {
         let configuredProfiles = profiles.isEmpty ? profile.map { [$0] } ?? [] : profiles
-        let activeModelProviderID = modelProvider ?? "openai"
         var providerEntries: [(id: String, profile: ProviderProfile)] = []
         var emittedProviderIDs = Set<String>()
         func appendProvider(id: String, profile: ProviderProfile) {
@@ -340,13 +328,6 @@ enum RouteConfigManager {
         }
         if let codeAPI = configuredProfiles.first(where: { $0.id == "codeapi" || $0.isCodeAPI }) {
             appendProvider(id: "codeapi", profile: codeAPI)
-        }
-        if case .provider = route, let activeProfile = profile {
-            // Keep the top-level provider identifier stable so existing Codex
-            // sessions remain visible, while explicitly disabling the optional
-            // Responses WebSocket transport for the provider that is actually
-            // active. Codex then uses HTTP/SSE for Responses requests.
-            appendProvider(id: activeModelProviderID, profile: activeProfile)
         }
 
         var cleaned = removingManagedBlocks(from: content)
@@ -371,7 +352,7 @@ enum RouteConfigManager {
         }
 
         while lines.first?.isEmpty == true { lines.removeFirst() }
-        let renderedModelProvider = tomlEscape(activeModelProviderID)
+        let renderedModelProvider = tomlEscape(modelProvider ?? "openai")
         switch route {
         case .official:
             lines.insert("model_provider = \"\(renderedModelProvider)\"", at: 0)
@@ -470,22 +451,12 @@ enum RouteConfigManager {
         name = "\(tomlEscape(profile.name))"
         base_url = "\(tomlEscape(baseURL))"
         wire_api = "responses"
-        supports_websockets = false
 
         [model_providers.\(id).auth]
         command = "/bin/cat"
         args = ["\(tomlEscape(CredentialStore.keyURL(for: profile.id).path))"]
         timeout_ms = 5000
         """
-    }
-
-    private static func providerTable(in content: String, id: String) -> Substring? {
-        let marker = "[model_providers.\(id)]"
-        guard let start = content.range(of: marker, options: .caseInsensitive) else { return nil }
-        let suffix = content[start.lowerBound...]
-        let afterMarker = suffix.index(start.lowerBound, offsetBy: marker.count)
-        let end = suffix[afterMarker...].range(of: "\n[")?.lowerBound ?? suffix.endIndex
-        return suffix[..<end]
     }
 
     private static func activeBaseURL(for profile: ProviderProfile) -> String {

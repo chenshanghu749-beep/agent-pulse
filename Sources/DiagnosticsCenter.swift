@@ -53,6 +53,12 @@ enum DiagnosticsCenter {
                 conflicts.append("托管提供商配置需要重新同步")
             }
         }
+        let profiles = ProviderStore.providers(for: agent)
+        let duplicateNames = Dictionary(grouping: profiles, by: { $0.name.lowercased() })
+            .filter { $0.value.count > 1 }
+            .keys
+        if !duplicateNames.isEmpty { conflicts.append("存在重复配置名：\(duplicateNames.sorted().joined(separator: ", "))") }
+
         let activity = TaskActivityReader.compatibilityInfo()
         let routeName = provider?.name ?? (agent == .codex ? route.displayName : "官方")
         let model = provider?.model ?? currentModel(agent: agent)

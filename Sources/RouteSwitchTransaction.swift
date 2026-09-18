@@ -4,7 +4,6 @@ enum RouteSwitchTransactionError: LocalizedError {
     case missingProvider
     case missingCredential(String)
     case invalidProvider(String)
-    case modelUnavailable(String, String)
     case verificationFailed
 
     var errorDescription: String? {
@@ -12,8 +11,6 @@ enum RouteSwitchTransactionError: LocalizedError {
         case .missingProvider: return "所选提供商不存在，请重新选择。"
         case let .missingCredential(name): return "\(name) 尚未配置 API Key。"
         case let .invalidProvider(message): return "提供商配置无效：\(message)"
-        case let .modelUnavailable(name, message):
-            return "\(name) 的模型测试失败：\(message)\n路由未切换，Codex 保持当前状态。"
         case .verificationFailed: return "路由写入后的校验未通过，已恢复切换前配置。"
         }
     }
@@ -41,21 +38,6 @@ enum RouteSwitchTransaction {
         }
         guard CredentialStore.load(providerID: id)?.isEmpty == false else {
             throw RouteSwitchTransactionError.missingCredential(profile.name)
-        }
-    }
-
-    static func verifyModelAvailability(_ route: RouteChoice) async throws {
-        try preflight(route)
-        guard case let .provider(id) = route,
-              let profile = ProviderStore.provider(id: id),
-              let key = CredentialStore.load(providerID: id) else { return }
-        do {
-            _ = try await ProviderConnectionTester.test(profile: profile, key: key)
-        } catch {
-            throw RouteSwitchTransactionError.modelUnavailable(
-                profile.name,
-                error.localizedDescription
-            )
         }
     }
 

@@ -29,10 +29,6 @@ enum ProviderConnectionTester {
             return try await testCodeAPI(profile: profile, key: key)
         }
 
-        return try await testInference(profile: profile, key: key)
-    }
-
-    private static func testInference(profile: ProviderProfile, key: String) async throws -> String {
         let endpoint = try endpointURL(profile: profile)
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -97,10 +93,46 @@ enum ProviderConnectionTester {
     }
 
     private static func testCodeAPI(profile: ProviderProfile, key: String) async throws -> String {
-        // A successful /models response only proves that a model is listed.
-        // Perform an actual inference before allowing a route to be selected.
-        let result = try await testInference(profile: profile, key: key)
-        return "\(result) · CodeAPI 模型可用"
+        let usage = try await CodeAPIClient.fetch(key: key)
+        let modelsURL = try codeAPIModelsURL(profile: profile)
+        var request = URLRequest(url: modelsURL)
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Agent-Pulse/\(AppUpdateChecker.currentVersion)", forHTTPHeaderField: "User-Agent")
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await self.data(for: request, timeout: 10)
+        } catch let error as URLError where error.code == .timedOut {
+            throw ProviderConnectionError.timeout
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw ProviderConnectionError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ProviderConnectionError.server(http.statusCode, errorMessage(from: data))
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = object["data"] as? [[String: Any]] else {
+            throw ProviderConnectionError.invalidResponse
+        }
+        let models = Set(entries.compactMap { $0["id"] as? String })
+        guard models.contains(profile.model) else {
+            throw ProviderConnectionError.modelUnavailable(profile.model)
+        }
+        return String(format: "连接成功 · CodeAPI · 余额 $%.2f · 模型可用", usage.balance)
+    }
+
+    private static func codeAPIModelsURL(profile: ProviderProfile) throws -> URL {
+        var base = profile.normalizedBaseURL
+        if !base.lowercased().hasSuffix("/v1") {
+            base += "/v1"
+        }
+        guard let url = URL(string: base + "/models") else {
+            throw ProviderConnectionError.invalidURL
+        }
+        return url
     }
 
     private static func data(
@@ -117,11 +149,7 @@ enum ProviderConnectionTester {
     }
 
     static func endpointURL(profile: ProviderProfile) throws -> URL {
-        var base = profile.normalizedBaseURL
-        if profile.isCodeAPI,
-           !(URL(string: base)?.path.lowercased().hasPrefix("/v1") ?? false) {
-            base += "/v1"
-        }
+        let base = profile.normalizedBaseURL
         let suffix: String
         switch profile.effectiveAPIFormat {
         case .anthropicMessages:
