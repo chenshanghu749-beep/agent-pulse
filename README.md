@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.3.3-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.5-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -31,6 +31,13 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse 菜单栏预览" width="100%">
 </p>
 
+## 3.3.5 更新
+
+- 全新安装不再自动添加 CodeAPI；新增提供商时配置名、Base URL 与模型均由用户填写。
+- 未登录官方账号时也能切回 OpenAI 路由并进入登录流程；第三方凭据与官方账号保持隔离。
+- Codex 的 Model Provider 默认使用 `openai`，保留用户明确设置的自定义值，并清理旧版误写的内置 provider 覆盖配置。
+- 第三方 Codex 路由固定使用 HTTP，避免 WebSocket 连接异常。
+
 ## 3.3.3 更新
 
 - 修复 macOS 锁屏唤醒、菜单栏重新布局或余额轮播切换后，状态图标与提供商名称、余额偶发重叠的问题。
@@ -41,13 +48,6 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 - 修复“监控与历史”卡片悬浮时整体缩放，导致图标和文字插值模糊的问题；现在保留阴影反馈但不再放大内容。
 - 历史柱状图新增即时悬浮详情，显示日期、真实指标值与当天采样次数，空数据日期会显示“暂无采样”。
 - 悬浮柱增加清晰描边，并继续支持剩余百分比、余额、Token 与费用等不同历史指标。
-
-## 3.3.1 更新
-
-- OpenAI 官方用量兼容 `5h` 与 `7d` 双窗口，状态栏、仪表盘、设置页、下拉菜单和桌面组件统一展示剩余用量。
-- 状态栏官方用量使用 `官方 5h 99% · 7d 59%` 紧凑格式，并扩大完整文字区域，避免第二个窗口被裁切。
-- 修复 Cursor 1.x 部分账户把小数百分比错误按比例换算，导致剩余用量从 99% 误显示为 59% 的问题。
-- 官方用量监控与阈值提醒改为跟随当前限制更紧的窗口，并让余额轮播无需打开仪表盘即可及时刷新。
 
 ## 核心功能
 
@@ -62,14 +62,14 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 | 配置与安全 | 本地配置快照、差异预览、恢复与脱敏导入导出 |
 | 状态外观 | 多种菜单栏状态图标，使用紧凑的黑白卡片快速预览和切换 |
 | 会话保持 | 路由切换不改写 Codex、Cursor 或 Hermes 的会话数据库 |
-| model_provider | 首次启动读取 Codex 当前配置，可在模型与路由页面中修改并恢复为 openai |
+| model_provider | 默认使用 openai；保留用户明确设置的自定义值，可在模型与路由页面修改 |
 
 第三方路由统一通过厂商原生 Responses API 直连，不启动本地协议桥接服务。阿里百炼云预设可直接使用 Responses API；智谱 AI 的连接测试会按官方 Chat Completions 接口验证 API Key 与模型，但在智谱开放 Responses API 前不能作为 Codex 直连路由。所有提供商均可在启用前测试 Base URL、API Key 与模型。
 
 ## 使用方式
 
 1. 打开 Agent Pulse，选择 `Codex`、`Cursor`、`Hermes`、`Claude CLI` 或 `OpenCode`。
-2. Codex 可选择 OpenAI 官方路由，或添加预设/自定义提供商并测试连接。
+2. Codex 可选择 OpenAI 官方路由，或添加预设/自定义提供商并测试连接。新增配置需要自行填写 Base URL、API Key 和模型。
 3. Cursor 继续在官方应用中管理模型和 API Key；Agent Pulse 可绑定一个已配置的提供商展示余额。
 4. Hermes 可保留当前配置，也可以添加提供商并选择模型；切换后不会重启正在运行的任务。
 5. 点击“应用并打开”，状态栏会同步当前 Agent、余额或 Token 以及任务状态。
@@ -84,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/chenshanghu749-beep/agent-pulse/mai
 
 ## 手动安装
 
-下载 [`Agent-Pulse-3.3.3.dmg`](dist/Agent-Pulse-3.3.3.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
+下载 [`Agent-Pulse-3.3.5.dmg`](dist/Agent-Pulse-3.3.5.dmg)，打开后将 `Agent Pulse.app` 拖入 `Applications`。
 
 若 macOS 首次运行时阻止打开，请在 Finder 中右键应用并选择“打开”。
 
@@ -98,7 +98,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.3.dmg`。
+构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.5.dmg`。
 
 ## 隐私与安全
 
@@ -129,4 +129,4 @@ chmod +x build.sh package.sh
 
 </details>
 
-当前版本：`3.3.3`
+当前版本：`3.3.5`

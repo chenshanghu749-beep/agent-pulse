@@ -623,8 +623,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "请重新登录 OpenAI 官方账号"
-        alert.informativeText = "检测到 Codex 的认证文件中残留了第三方 API Key，已将它安全移出官方认证。请在 Codex 中登录一次，后续切换会自动备份和恢复官方登录。"
+        alert.messageText = "请登录 OpenAI 官方账号"
+        alert.informativeText = "已切换到官方路由，但没有可恢复的官方登录。请在 Codex 中完成登录；之后切换第三方路由时会自动备份官方登录。"
         alert.addButton(withTitle: "知道了")
         alert.runModal()
     }

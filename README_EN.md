@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.3.3-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.5-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -22,6 +22,13 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse menu bar preview" width="100%">
 </p>
 
+## What's New in 3.3.5
+
+- Fresh installs no longer seed CodeAPI. New provider name, Base URL, and model are entered by the user.
+- Switching back to OpenAI works even without an official login and opens the sign-in flow; third-party credentials remain isolated.
+- Codex Model Provider defaults to `openai`, keeps user-defined custom values, and removes legacy overrides of built-in providers.
+- Third-party Codex routes use HTTP to avoid WebSocket disconnects.
+
 ## What's New in 3.3.3
 
 - Fixed an intermittent overlap between the status icon, provider name, and balance after wake, menu-bar relayout, or balance rotation.
@@ -32,13 +39,6 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
 - Fixed Monitoring and History cards scaling their entire contents on hover, which blurred icons and text; hover shadow feedback remains without content magnification.
 - Added immediate history chart hover details with the date, actual metric value, and daily sample count, including a clear no-samples state.
 - Added a crisp outline to the hovered bar while retaining support for remaining percentage, balance, token, and cost history metrics.
-
-## What's New in 3.3.1
-
-- OpenAI official usage now supports simultaneous `5h` and `7d` windows across the menu bar, dashboard, settings, menu, and desktop widget.
-- The menu bar uses the compact `官方 5h 99% · 7d 59%` format with enough reserved width to prevent the second window from being clipped.
-- Fixed Cursor 1.x fractional percentage values being misread as ratios, which could show 59% remaining when Cursor reported 99%.
-- Official usage monitoring and alerts now follow the tighter active window, while balance rotation refreshes without requiring the dashboard to be opened.
 
 ## Quick Install
 
@@ -61,14 +61,14 @@ Agent Pulse launches automatically after installation. The default location is `
 | Configuration security | Create local snapshots, preview diffs, restore, and import/export redacted settings |
 | Status appearance | Preview and switch among multiple menu bar indicators in a compact monochrome gallery |
 | Session continuity | Route switching never rewrites the Codex, Cursor, or Hermes session database |
-| model_provider | Read the current Codex value on first launch; edit or restore it from the model and route page |
+| model_provider | Default to openai, preserve explicit custom values, and edit it from the model and route page |
 
 Third-party routes connect directly through each provider's native Responses API, without a local protocol bridge. The Alibaba Model Studio preset supports Responses API directly. Zhipu AI connection tests use its official Chat Completions endpoint to validate the key and model, but Zhipu cannot be used as a direct Codex route until it exposes a Responses-compatible endpoint. Cursor BYOK remains managed by Cursor’s official Models settings.
 
 ## Usage
 
 1. Open Agent Pulse and select `Codex`, `Cursor`, `Hermes`, `Claude CLI`, or `OpenCode`.
-2. Codex supports the official OpenAI route plus preset or custom providers with connection testing.
+2. Codex supports the official OpenAI route plus preset or custom providers with connection testing. Enter the Base URL, API key, and model for a new provider.
 3. Cursor keeps managing models and API keys in its own settings; Agent Pulse can display a selected provider balance.
 4. Hermes can keep its current configuration or use an Agent Pulse provider and model without restarting an active task.
 5. Click `Apply and Open` to synchronize the selected Agent, balance or token usage, and task state in the menu bar.
@@ -83,7 +83,7 @@ The menu bar icon continuously reflects the current task status. A three-color t
 
 ## Manual Installation
 
-Download [`Agent-Pulse-3.3.3.dmg`](dist/Agent-Pulse-3.3.3.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
+Download [`Agent-Pulse-3.3.5.dmg`](dist/Agent-Pulse-3.3.5.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
 
 If macOS blocks the first launch, right-click the app in Finder and select `Open`.
 
@@ -97,7 +97,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.3.3.dmg`.
+The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.3.5.dmg`.
 
 ## Privacy and Security
 
@@ -123,4 +123,4 @@ If Agent Pulse is useful to you, you can support its ongoing maintenance through
   <img src="docs/assets/wechat-pay.jpg" alt="WeChat payment QR code" width="320">
 </p>
 
-Current version: `3.3.3`
+Current version: `3.3.5`

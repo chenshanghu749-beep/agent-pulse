@@ -46,6 +46,29 @@ enum RouteConfigManager {
     static let legacyBeginMarker = "# >>> CodeAPI Status managed provider >>>"
     static let legacyEndMarker = "# <<< CodeAPI Status managed provider <<<"
 
+    /// Provider IDs that Codex defines itself. Codex refuses to load a config.toml
+    /// that redefines them (`model_providers contains reserved built-in provider
+    /// IDs`), and the Bedrock ones only accept a handful of keys, so Agent Pulse
+    /// never emits a provider table for these IDs. The built-in `openai` provider
+    /// is routed through `openai_base_url` plus the API key in `~/.codex/auth.json`
+    /// instead, which needs no override table.
+    static let reservedCodexProviderIDs: Set<String> = [
+        "openai",
+        "ollama",
+        "lmstudio",
+        "amazon-bedrock",
+        "amazon-bedrock-runtime",
+    ]
+
+    static func isReservedCodexProviderID(_ providerID: String) -> Bool {
+        reservedCodexProviderIDs.contains(providerID.lowercased())
+    }
+
+    /// True when the config declares a table for a reserved built-in provider.
+    static func containsReservedProviderOverride(_ content: String) -> Bool {
+        removingReservedProviderOverrides(from: content) != content
+    }
+
     static var configURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex", isDirectory: true)
@@ -61,6 +84,33 @@ enum RouteConfigManager {
             return "openai"
         }
         return value
+    }
+
+    static func modelProviderForRoute(in content: String) -> String {
+        let value = topLevelValue(named: "model_provider", in: content) ?? "openai"
+        let lowered = value.lowercased()
+        if containsManagedBlock(content),
+           lowered == "codeapi" || lowered == legacyManagedProviderID
+                || lowered.hasPrefix("codeapi_status_provider_") {
+            // An older Agent Pulse route used its generated provider ID as
+            // model_provider. Do not carry that route into official login.
+            return "openai"
+        }
+        return value
+    }
+
+    /// Also recognizes a third-party route whose saved profile was removed,
+    /// so switching back to ChatGPT can clear its orphaned API-key auth.
+    static func hasActiveProviderOverride(in content: String) -> Bool {
+        let provider = topLevelValue(named: "model_provider", in: content)?.lowercased()
+        if provider != nil, provider != "openai", containsManagedBlock(content) { return true }
+        return topLevelValue(named: "openai_base_url", in: content) != nil
+            && topLevelValue(named: "forced_login_method", in: content) == "api"
+    }
+
+    static func hasActiveProviderOverride() -> Bool {
+        guard let content = try? String(contentsOf: configURL, encoding: .utf8) else { return false }
+        return hasActiveProviderOverride(in: content)
     }
 
     /// Lists provider IDs declared in config.toml for display and validation.
@@ -117,7 +167,7 @@ enum RouteConfigManager {
             lines.insert("model_provider = \"\(tomlEscape(value))\"", at: 0)
         }
 
-        let rendered = lines.joined(separator: "\n")
+        let rendered = removingReservedProviderOverrides(from: lines.joined(separator: "\n"))
         try validate(rendered)
         try Data(rendered.utf8).write(to: configURL, options: .atomic)
     }
@@ -128,13 +178,14 @@ enum RouteConfigManager {
         guard !content.contains("<redacted>") else {
             throw RouteConfigError.invalidRenderedConfig("脱敏导出文件不能直接恢复，请重新填写 API Key 后再导入。")
         }
-        try validate(content)
+        let repaired = removingReservedProviderOverrides(from: content)
+        try validate(repaired)
         let directory = configURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         if let existing = try? Data(contentsOf: configURL), !existing.isEmpty {
             try existing.write(to: directory.appendingPathComponent("config.toml.agent-pulse.bak"), options: .atomic)
         }
-        try Data(content.utf8).write(to: configURL, options: .atomic)
+        try Data(repaired.utf8).write(to: configURL, options: .atomic)
     }
 
     static func currentRoute() -> RouteChoice {
@@ -180,7 +231,10 @@ enum RouteConfigManager {
         }
         // A non-openai model_provider may be intentional and is exposed in
         // settings. Never rewrite it merely because the selected route changed.
+        // A reserved override is always broken: Codex cannot load the file, so
+        // re-applying the current route is what strips it.
         return legacyCredential || missingManagedProvider
+            || containsReservedProviderOverride(content)
     }
 
     static func detectedRoute(
@@ -227,7 +281,7 @@ enum RouteConfigManager {
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             let existing = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
-            let existingModelProvider = topLevelValue(named: "model_provider", in: existing) ?? "openai"
+            let existingModelProvider = modelProviderForRoute(in: existing)
             let existingProvider = topLevelProvider(in: existing)?.lowercased()
             let existingRoute = detectedRoute(
                 in: existing,
@@ -331,6 +385,10 @@ enum RouteConfigManager {
         }
 
         var cleaned = removingManagedBlocks(from: content)
+        // An older release wrote `[model_providers.openai]` for the active route.
+        // Drop any reserved override that survives the managed-block cleanup so
+        // the rendered config stays loadable by Codex.
+        cleaned = removingReservedProviderOverrides(from: cleaned)
         cleaned = removingProviderTables(
             from: cleaned,
             providerIDs: Set(providerEntries.map { $0.id.lowercased() })
@@ -398,6 +456,11 @@ enum RouteConfigManager {
             guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
 
             if let header = tableHeader(in: trimmed) {
+                if let reserved = reservedProviderID(inTableName: header.name) {
+                    throw RouteConfigError.invalidRenderedConfig(
+                        "Codex 不允许覆盖内置 provider `\(reserved)`，已停止写入 config.toml；请删除 [model_providers.\(reserved)] 或改用自定义 provider ID。"
+                    )
+                }
                 if header.isArray {
                     let instance = arrayTableInstances[header.name, default: 0]
                     arrayTableInstances[header.name] = instance + 1
@@ -446,11 +509,15 @@ enum RouteConfigManager {
 
     private static func providerBlock(id: String, profile: ProviderProfile) -> String {
         let baseURL = activeBaseURL(for: profile)
+        // Reserved built-in IDs never reach this helper: Codex cannot load a
+        // config that redefines them, so `render` routes those through
+        // `openai_base_url` instead of emitting a table.
         return """
         [model_providers.\(id)]
         name = "\(tomlEscape(profile.name))"
         base_url = "\(tomlEscape(baseURL))"
         wire_api = "responses"
+        supports_websockets = false
 
         [model_providers.\(id).auth]
         command = "/bin/cat"
@@ -507,6 +574,45 @@ enum RouteConfigManager {
     private static func containsManagedBlock(_ content: String) -> Bool {
         (content.contains(beginMarker) && content.contains(endMarker))
             || (content.contains(legacyBeginMarker) && content.contains(legacyEndMarker))
+    }
+
+    /// Removes every `[model_providers.<reserved>]` table, including sub-tables
+    /// such as `model_providers.openai.auth`. Configs written by the 3.3.4 build
+    /// contain one for the active route and Codex then refuses to start, so this
+    /// doubles as the repair step during route switching and config import.
+    static func removingReservedProviderOverrides(from content: String) -> String {
+        var kept: [String] = []
+        var shouldSkip = false
+        var previousRemoved = false
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let header = tableHeader(in: trimmed) {
+                shouldSkip = reservedProviderID(inTableName: header.name) != nil
+            }
+            guard !shouldSkip else {
+                previousRemoved = true
+                continue
+            }
+            // Do not leave a doubled (or leading) blank line where the table sat.
+            if previousRemoved,
+               trimmed.isEmpty,
+               kept.last?.trimmingCharacters(in: .whitespaces).isEmpty ?? true {
+                previousRemoved = false
+                continue
+            }
+            previousRemoved = false
+            kept.append(line)
+        }
+        return kept.joined(separator: "\n")
+    }
+
+    /// The reserved provider ID a table name touches, if any.
+    static func reservedProviderID(inTableName name: String) -> String? {
+        let lowered = name.lowercased()
+        guard lowered.hasPrefix("model_providers.") else { return nil }
+        let suffix = lowered.dropFirst("model_providers.".count)
+        let candidate = String(suffix.prefix(while: { $0 != "." }))
+        return reservedCodexProviderIDs.contains(candidate) ? candidate : nil
     }
 
     private static func removingProviderTables(

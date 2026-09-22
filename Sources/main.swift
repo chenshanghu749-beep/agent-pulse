@@ -955,10 +955,23 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
     precondition(!AgentKind.hermes.supportsModelProviderConfiguration)
     precondition(!AgentKind.claude.supportsModelProviderConfiguration)
     precondition(!AgentKind.openCode.supportsModelProviderConfiguration)
+    let freshInstall = ProviderStore.initialState()
+    if !freshInstall.providers.isEmpty || freshInstall.selectedProviderID != nil {
+        print("SELF_TEST_ERROR fresh install preselects a provider")
+        exit(EXIT_FAILURE)
+    }
+    let newPresetDraft = ProviderEditorDraftValues.new(for: .deepSeek)
+    if !newPresetDraft.name.isEmpty || !newPresetDraft.baseURL.isEmpty || !newPresetDraft.model.isEmpty
+        || ProviderEditorDraftValues.baseURL(
+            for: .deepSeek,
+            enteredValue: "https://custom.example.com/v1"
+        ) != "https://custom.example.com/v1" {
+        print("SELF_TEST_ERROR preset provider editor silently prefills or overrides user parameters")
+        exit(EXIT_FAILURE)
+    }
     precondition(ProviderAPIFormat.allCases.contains(.anthropicMessages))
     for vendor in ProviderVendor.presetChoices where vendor != .custom {
         precondition(vendor.defaultBaseURL?.hasPrefix("https://") == true)
-        precondition(vendor.defaultModel?.isEmpty == false)
     }
     precondition(ProviderVendor.presetChoices.contains(.miMo))
     precondition(ProviderVendor.presetChoices.contains(.bailian))
@@ -997,6 +1010,32 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
     )
     precondition(ProviderVendor.infer(from: "https://api.x.ai/v1") == .xAI)
     precondition(ProviderVendor.infer(from: "https://api.example.com/v1") == .custom)
+    let freshOfficialConfig = RouteConfigManager.render("", route: .official)
+    precondition(freshOfficialConfig == "model_provider = \"openai\"\n")
+    let freshProviderConfig = RouteConfigManager.render("", route: .provider(provider.id), profile: provider)
+    precondition(freshProviderConfig.hasPrefix("model_provider = \"openai\""))
+    precondition(!freshProviderConfig.contains("[model_providers.codeapi]"))
+    let legacyManagedProvider = """
+    model_provider = "codeapi"
+    # >>> Agent Pulse managed provider >>>
+    [model_providers.codeapi]
+    base_url = "https://codeapi.nexita.net/v1"
+    # <<< Agent Pulse managed provider <<<
+    """
+    if RouteConfigManager.modelProviderForRoute(in: legacyManagedProvider) != "openai" {
+        print("SELF_TEST_ERROR legacy managed route remains Model Provider after switching to official")
+        exit(EXIT_FAILURE)
+    }
+    precondition(RouteConfigManager.modelProviderForRoute(
+        in: "model_provider = \"custom_runtime\"\n"
+    ) == "custom_runtime")
+    precondition(RouteConfigManager.modelProviderForRoute(in: """
+    model_provider = "custom_runtime"
+    # >>> Agent Pulse managed provider >>>
+    [model_providers.codeapi]
+    base_url = "https://codeapi.nexita.net/v1"
+    # <<< Agent Pulse managed provider <<<
+    """) == "custom_runtime")
     let custom = RouteConfigManager.render(sample, route: .provider(provider.id), profile: provider)
     precondition(custom.hasPrefix("model_provider = \"openai\""))
     precondition(custom.contains("model = \"custom-model\""))
@@ -1009,6 +1048,11 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
     precondition(custom.contains("command = \"/bin/cat\""))
     precondition(custom.contains("test-provider.key"))
     precondition(custom.contains("[model_providers.codeapi_status_custom]"))
+    // Third-party Responses endpoints do not speak the optional WebSocket
+    // transport, so every Agent Pulse managed provider opts out explicitly.
+    precondition(custom.contains("supports_websockets = false"))
+    precondition(!custom.contains("[model_providers.openai]"))
+    precondition(!custom.contains("[model_providers.ollama]"))
     precondition(!custom.contains("model_provider = \"legacy\""))
 
     let preservedModelProvider = RouteConfigManager.render(
@@ -1211,6 +1255,88 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
         selectedProviderID: provider.id
     ))
 
+    // Codex refuses to load any config.toml that redefines a built-in provider,
+    // which is what the 3.3.4 managed block did for the active route. Agent Pulse
+    // must strip that table, keep routing through openai_base_url, and refuse to
+    // write it back.
+    precondition(RouteConfigManager.reservedCodexProviderIDs.isSuperset(
+        of: ["openai", "ollama", "lmstudio", "amazon-bedrock", "amazon-bedrock-runtime"]
+    ))
+    precondition(RouteConfigManager.isReservedCodexProviderID("OpenAI"))
+    precondition(!RouteConfigManager.isReservedCodexProviderID("codeapi"))
+    let reservedOverrideConfig = """
+    model_provider = "openai"
+    model = "custom-model"
+    openai_base_url = "https://api.example.com/v1"
+    forced_login_method = "api"
+    cli_auth_credentials_store = "file"
+
+    \(RouteConfigManager.beginMarker)
+
+    [model_providers.codeapi_status_custom]
+    name = "Test Provider"
+    base_url = "https://api.example.com/v1"
+    wire_api = "responses"
+
+    [model_providers.openai]
+    name = "Test Provider"
+    base_url = "https://api.example.com/v1"
+    wire_api = "responses"
+    supports_websockets = false
+
+    [model_providers.openai.auth]
+    command = "/bin/cat"
+    args = ["/tmp/test-provider.key"]
+
+    \(RouteConfigManager.endMarker)
+    """
+    precondition(RouteConfigManager.containsReservedProviderOverride(reservedOverrideConfig))
+    precondition(RouteConfigManager.needsUpgradeReconciliation(
+        in: reservedOverrideConfig,
+        profiles: [provider],
+        selectedProviderID: provider.id
+    ))
+    precondition(RouteConfigManager.detectedRoute(
+        in: reservedOverrideConfig,
+        profiles: [provider],
+        selectedProviderID: provider.id
+    ) == .provider(provider.id))
+    let reservedOverrideRepaired = RouteConfigManager.render(
+        reservedOverrideConfig,
+        route: .provider(provider.id),
+        profile: provider,
+        profiles: [provider],
+        legacyProfile: provider
+    )
+    precondition(!reservedOverrideRepaired.contains("[model_providers.openai"))
+    precondition(!RouteConfigManager.containsReservedProviderOverride(reservedOverrideRepaired))
+    precondition(reservedOverrideRepaired.hasPrefix("model_provider = \"openai\""))
+    precondition(reservedOverrideRepaired.contains("openai_base_url = \"https://api.example.com/v1\""))
+    precondition(reservedOverrideRepaired.contains("forced_login_method = \"api\""))
+    precondition(reservedOverrideRepaired.contains("[model_providers.codeapi_status_custom]"))
+    precondition(reservedOverrideRepaired.contains("supports_websockets = false"))
+    precondition(reservedOverrideRepaired.contains("[model_providers.codeapi_status_provider_test-provider]"))
+    try! RouteConfigManager.validate(reservedOverrideRepaired)
+    precondition(!RouteConfigManager.needsUpgradeReconciliation(
+        in: reservedOverrideRepaired,
+        profiles: [provider],
+        selectedProviderID: provider.id
+    ))
+    precondition(reservedOverrideRepaired.contains(RouteConfigManager.beginMarker))
+    let strippedReserved = RouteConfigManager.removingReservedProviderOverrides(
+        from: "[model_providers.ollama]\nbase_url = \"http://localhost:11434/v1\"\n\n[model_providers.openai.auth]\ncwd = \".\"\n\n[mcp_servers.example]\ncommand = \"example\"\n"
+    )
+    precondition(strippedReserved == "[mcp_servers.example]\ncommand = \"example\"\n")
+    do {
+        try RouteConfigManager.validate(
+            "[model_providers.lmstudio]\nbase_url = \"http://localhost:1234/v1\"\n"
+        )
+        print("SELF_TEST_ERROR reserved provider override accepted")
+        exit(EXIT_FAILURE)
+    } catch {
+        precondition(String(describing: error).contains("内置 provider"))
+    }
+
     let catalogFixture = try! JSONSerialization.data(withJSONObject: [
         "models": [
             [
@@ -1243,6 +1369,38 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
         "OPENAI_API_KEY": providerKey,
         "tokens": ["access_token": "official-access-token"]
     ])
+    let orphanedProviderAuth = try! JSONSerialization.data(withJSONObject: [
+        "auth_mode": "apikey",
+        "OPENAI_API_KEY": "orphaned-third-party-key"
+    ])
+    precondition(CodexAuthStore.officialPlan(
+        currentData: nil,
+        backupData: nil,
+        configuredProviderKeys: []
+    ) == .removeCurrentAndRequireLogin)
+    if CodexAuthStore.officialPlan(
+        currentData: orphanedProviderAuth,
+        backupData: nil,
+        configuredProviderKeys: [providerKey],
+        leavingProviderRoute: true
+    ) != .removeCurrentAndRequireLogin {
+        print("SELF_TEST_ERROR official route retains third-party API auth without ChatGPT login")
+        exit(EXIT_FAILURE)
+    }
+    precondition(CodexAuthStore.officialPlan(
+        currentData: orphanedProviderAuth,
+        backupData: nil,
+        configuredProviderKeys: [providerKey]
+    ) == .keepCurrent)
+    precondition(RouteConfigManager.hasActiveProviderOverride(in: custom))
+    precondition(!RouteConfigManager.hasActiveProviderOverride(in: sample))
+    precondition(RouteConfigManager.hasActiveProviderOverride(in: """
+    model_provider = "third_party"
+    # >>> Agent Pulse managed provider >>>
+    [model_providers.third_party]
+    base_url = "https://proxy.example.com/v1"
+    # <<< Agent Pulse managed provider <<<
+    """))
     precondition(CodexAuthStore.kind(
         of: providerAuth,
         configuredProviderKeys: [providerKey]

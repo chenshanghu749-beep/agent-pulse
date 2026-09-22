@@ -87,20 +87,6 @@ enum ProviderVendor: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    var defaultModel: String? {
-        switch self {
-        case .deepSeek: return "deepseek-v4-flash"
-        case .zhipuAI: return "glm-5.2"
-        case .moonshot: return "kimi-k2.7-code"
-        case .miniMax: return "MiniMax-M2.7"
-        case .stepFun: return "step-3.5-flash"
-        case .miMo: return "mimo-v2.5-pro"
-        case .bailian: return "qwen3-coder-plus"
-        case .xAI: return "grok-4.5"
-        case .custom: return nil
-        }
-    }
-
     var balanceDescription: String {
         switch self {
         case .deepSeek: return "查询充值余额，不计赠送余额。"
@@ -154,6 +140,24 @@ enum ProviderVendor: String, Codable, CaseIterable, Sendable {
         case .deepSeek, .zhipuAI, .moonshot, .miniMax, .stepFun, .xAI: return true
         case .miMo, .bailian, .custom: return false
         }
+    }
+}
+
+struct ProviderEditorDraftValues {
+    let name: String
+    let baseURL: String
+    let model: String
+
+    static func new(for _: ProviderVendor) -> ProviderEditorDraftValues {
+        ProviderEditorDraftValues(
+            name: "",
+            baseURL: "",
+            model: ""
+        )
+    }
+
+    static func baseURL(for _: ProviderVendor, enteredValue: String) -> String {
+        enteredValue
     }
 }
 
@@ -253,6 +257,10 @@ enum ProviderStoreError: LocalizedError {
 }
 
 enum ProviderStore {
+    static func initialState() -> (providers: [ProviderProfile], selectedProviderID: String?) {
+        ([], nil)
+    }
+
     static var databaseURL: URL {
         CredentialStore.directoryURL.appendingPathComponent("providers.json")
     }
@@ -361,9 +369,10 @@ enum ProviderStore {
     private static func load() -> ProviderDatabase {
         guard let data = try? Data(contentsOf: databaseURL),
               let database = try? JSONDecoder().decode(ProviderDatabase.self, from: data) else {
+            let initial = initialState()
             return ProviderDatabase(
-                providers: [.codeAPI],
-                selectedProviderID: "codeapi",
+                providers: initial.providers,
+                selectedProviderID: initial.selectedProviderID,
                 officialModel: nil,
                 officialModelCatalogJSON: nil
             )

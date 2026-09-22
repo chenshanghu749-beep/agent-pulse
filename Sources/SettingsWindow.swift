@@ -2475,7 +2475,7 @@ final class SettingsWindowController: NSWindowController {
         for index in 0..<vendorGrid.numberOfRows { vendorGrid.row(at: index).yPlacement = .fill }
         let vendorHeading = sectionHeading(
             title: "选择厂商",
-            detail: "预设已内置服务地址与推荐模型；图标靠左排列，选中项使用黑白高对比边框。"
+            detail: "选择厂商后自行填写配置名、服务地址、模型和 API Key。"
         )
         let vendorSection = NSStackView(views: [vendorHeading, vendorGrid])
         vendorSection.orientation = .vertical
@@ -4191,18 +4191,14 @@ final class SettingsWindowController: NSWindowController {
         let previous = selectedVendor
         let existing = selectedProviderID.flatMap { id in providers.first(where: { $0.id == id }) }
         selectedVendor = sender.vendor
-        if let baseURL = selectedVendor.defaultBaseURL,
-           let model = selectedVendor.defaultModel {
-            baseURLField.stringValue = baseURL
-            modelField.stringValue = model
-            protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: selectedVendor.defaultAPIFormat ?? .responses) ?? 0)
-        } else if existing == nil {
-            baseURLField.stringValue = ""
-            modelField.stringValue = ""
-            protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: .automatic) ?? 0)
+        if existing == nil {
+            let initial = ProviderEditorDraftValues.new(for: selectedVendor)
+            baseURLField.stringValue = initial.baseURL
+            modelField.stringValue = initial.model
+            protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: selectedVendor.defaultAPIFormat ?? .automatic) ?? 0)
         }
-        if existing == nil || nameField.stringValue == "新提供商" || nameField.stringValue == previous.displayName {
-            nameField.stringValue = selectedVendor.displayName
+        if nameField.stringValue == "新提供商" || nameField.stringValue == previous.displayName {
+            nameField.stringValue = ""
         }
         updateVendorEditor(animated: true)
         window?.makeFirstResponder(nameField)
@@ -4213,11 +4209,12 @@ final class SettingsWindowController: NSWindowController {
             button.setChoiceSelected(vendor == selectedVendor)
         }
         let applyState = {
-            self.customProviderFields.isHidden = self.selectedVendor != .custom
+            self.customProviderFields.isHidden = false
             self.providerPresetSummary.isHidden = self.selectedVendor == .custom
+            self.baseURLField.placeholderString = self.selectedVendor.defaultBaseURL ?? "https://api.example.com"
             if let baseURL = self.selectedVendor.defaultBaseURL,
                let format = self.selectedVendor.defaultAPIFormat {
-                self.providerPresetSummary.stringValue = "已内置  \(baseURL)   ·   \(format.displayName)"
+                self.providerPresetSummary.stringValue = "参考地址  \(baseURL)   ·   \(format.displayName)（可编辑）"
             } else {
                 self.providerPresetSummary.stringValue = ""
             }
@@ -4250,9 +4247,10 @@ final class SettingsWindowController: NSWindowController {
         providerPopup.item(at: 0)?.representedObject = selectedProviderID
         providerPopup.selectItem(at: 0)
         selectedVendor = .deepSeek
-        nameField.stringValue = selectedVendor.displayName
-        baseURLField.stringValue = selectedVendor.defaultBaseURL ?? ""
-        modelField.stringValue = selectedVendor.defaultModel ?? ""
+        let initial = ProviderEditorDraftValues.new(for: selectedVendor)
+        nameField.stringValue = initial.name
+        baseURLField.stringValue = initial.baseURL
+        modelField.stringValue = initial.model
         keyField.stringValue = ""
         protocolPopup.selectItem(at: ProviderAPIFormat.allCases.firstIndex(of: selectedVendor.defaultAPIFormat ?? .responses) ?? 0)
         updateVendorEditor(animated: false)
@@ -4395,12 +4393,17 @@ final class SettingsWindowController: NSWindowController {
     private func currentProviderDraft() throws -> (profile: ProviderProfile, key: String) {
         guard let id = selectedProviderID else { throw SettingsError.noProvider }
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = (selectedVendor.defaultBaseURL ?? baseURLField.stringValue)
+        let baseURL = ProviderEditorDraftValues.baseURL(
+            for: selectedVendor,
+            enteredValue: baseURLField.stringValue
+        )
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let model = modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !model.isEmpty, !key.isEmpty else { throw SettingsError.incomplete }
+        guard !name.isEmpty, !baseURL.isEmpty, !model.isEmpty, !key.isEmpty else {
+            throw SettingsError.incomplete
+        }
         if ProviderStore.hasNameCollision(
             name,
             excluding: id,

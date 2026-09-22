@@ -79,7 +79,7 @@ enum CodexAuthStore {
         do {
             switch route {
             case .official:
-                return try prepareOfficialAuth()
+                return try prepareOfficialAuth(leavingProviderRoute: RouteConfigManager.hasActiveProviderOverride())
             case let .provider(id):
                 try prepareProviderAuth(providerID: id)
                 return .ready
@@ -104,7 +104,8 @@ enum CodexAuthStore {
     static func officialPlan(
         currentData: Data?,
         backupData: Data?,
-        configuredProviderKeys: Set<String>
+        configuredProviderKeys: Set<String>,
+        leavingProviderRoute: Bool = false
     ) -> CodexOfficialAuthPlan {
         if kind(of: currentData, configuredProviderKeys: configuredProviderKeys) == .chatGPT,
            let currentData,
@@ -116,10 +117,12 @@ enum CodexAuthStore {
            let sanitized = sanitizedChatGPTAuth(backupData) {
             return .restoreBackup(sanitized)
         }
-        if kind(of: currentData, configuredProviderKeys: configuredProviderKeys) == .configuredProviderAPIKey {
+        let currentKind = kind(of: currentData, configuredProviderKeys: configuredProviderKeys)
+        if currentKind == .configuredProviderAPIKey
+            || (leavingProviderRoute && currentKind == .otherAPIKey) {
             return .removeCurrentAndRequireLogin
         }
-        if kind(of: currentData, configuredProviderKeys: configuredProviderKeys) == .empty {
+        if currentKind == .empty {
             return .removeCurrentAndRequireLogin
         }
         return .keepCurrent
@@ -135,14 +138,15 @@ enum CodexAuthStore {
         return nonemptyString(object["OPENAI_API_KEY"]) != key
     }
 
-    private static func prepareOfficialAuth() throws -> CodexAuthPreparation {
+    private static func prepareOfficialAuth(leavingProviderRoute: Bool) throws -> CodexAuthPreparation {
         let currentData = try readIfPresent(authURL)
         let backupData = try readIfPresent(officialBackupURL)
         let providerKeys = configuredProviderKeys()
         switch officialPlan(
             currentData: currentData,
             backupData: backupData,
-            configuredProviderKeys: providerKeys
+            configuredProviderKeys: providerKeys,
+            leavingProviderRoute: leavingProviderRoute
         ) {
         case let .useCurrent(data):
             try writeSecure(data, to: authURL)
