@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 struct CodexSessionSummary: Sendable {
@@ -56,21 +55,10 @@ enum SessionHistoryClient {
         }
     }
 
-    private static func codexURL() -> URL? {
-        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: CodexLauncher.bundleIdentifier) {
-            let bundled = appURL.appendingPathComponent("Contents/Resources/codex")
-            if FileManager.default.isExecutableFile(atPath: bundled.path) { return bundled }
-        }
-        return [
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex"
-        ]
-        .map(URL.init(fileURLWithPath:))
-        .first { FileManager.default.isExecutableFile(atPath: $0.path) }
-    }
-
     private static func fetchBlocking(limit: Int) throws -> [CodexSessionSummary] {
-        guard let executable = codexURL() else { throw SessionHistoryError.codexNotFound }
+        guard let executable = CodexExecutableLocator.url(for: CodexLauncher.bundleIdentifier) else {
+            throw SessionHistoryError.codexNotFound
+        }
 
         let process = Process()
         process.executableURL = executable
@@ -199,7 +187,9 @@ enum SessionHistoryClient {
     }
 
     private static func unarchiveBlocking(id: String) throws {
-        guard let executable = codexURL() else { throw SessionHistoryError.codexNotFound }
+        guard let executable = CodexExecutableLocator.url(for: CodexLauncher.bundleIdentifier) else {
+            throw SessionHistoryError.codexNotFound
+        }
         let process = Process()
         process.executableURL = executable
         process.arguments = ["app-server", "--stdio", "-c", "model_provider=\"openai\""]
