@@ -31,7 +31,7 @@ enum CodexModelCatalog {
 
     static func prepareIfNeeded(model: String) throws -> URL? {
         guard needsCompatibilityOverride(model: model) else { return nil }
-        guard let executable = codexURL() else {
+        guard let executable = CodexExecutableLocator.url(for: CodexLauncher.bundleIdentifier) else {
             throw CodexModelCatalogError.codexNotFound
         }
 
@@ -95,14 +95,5 @@ enum CodexModelCatalog {
             withJSONObject: root,
             options: [.prettyPrinted, .sortedKeys]
         )
-    }
-
-    private static func codexURL() -> URL? {
-        [
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex"
-        ]
-        .map(URL.init(fileURLWithPath:))
-        .first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 }

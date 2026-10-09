@@ -100,6 +100,12 @@ chmod +x build.sh package.sh
 
 构建产物位于 `build/Agent Pulse.app`，安装包位于 `dist/Agent-Pulse-3.3.5.dmg`。
 
+运行使用临时应用目录的 Codex 可执行文件查找回归测试：
+
+```bash
+./Tests/run-codex-executable-tests.sh
+```
+
 ## 隐私与安全
 
 - API Key 仅保存在本机，不会写入提供商列表或上传到仓库。

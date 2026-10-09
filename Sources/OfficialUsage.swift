@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 struct OfficialRateLimitWindow: Sendable {
@@ -126,21 +125,10 @@ enum OfficialUsageClient {
         }
     }
 
-    private static func codexURL() -> URL? {
-        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: CodexLauncher.bundleIdentifier) {
-            let bundled = appURL.appendingPathComponent("Contents/Resources/codex")
-            if FileManager.default.isExecutableFile(atPath: bundled.path) { return bundled }
-        }
-        return [
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex"
-        ]
-        .map(URL.init(fileURLWithPath:))
-        .first { FileManager.default.isExecutableFile(atPath: $0.path) }
-    }
-
     private static func fetchBlocking() throws -> OfficialUsageSnapshot {
-        guard let executable = codexURL() else { throw OfficialUsageError.codexNotFound }
+        guard let executable = CodexExecutableLocator.url(for: CodexLauncher.bundleIdentifier) else {
+            throw OfficialUsageError.codexNotFound
+        }
         // `account/read` is served by a newly spawned app-server process. On some
         // Codex builds it can temporarily return `account: null` even though the
         // desktop app and the shared Codex CLI session are authenticated. Treat
@@ -305,7 +293,9 @@ enum OfficialUsageClient {
     }
 
     static func loginStatusDiagnostic() -> String {
-        guard let executable = codexURL() else { return "executable=missing" }
+        guard let executable = CodexExecutableLocator.url(for: CodexLauncher.bundleIdentifier) else {
+            return "executable=missing"
+        }
         let result = loginStatus(executable: executable)
         return "executable=\(executable.path) status=\(result.status) loggedIn=\(result.loggedIn) output=\(result.output)"
     }
