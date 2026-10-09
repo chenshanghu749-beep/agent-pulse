@@ -340,7 +340,7 @@ enum OfficialUsageClient {
         rateResult: [String: Any]?,
         usageResult: [String: Any]?
     ) -> OfficialUsageSnapshot {
-        let limits = rateResult?["rateLimits"] as? [String: Any]
+        let limits = rateLimits(from: rateResult)
         let summary = usageResult?["summary"] as? [String: Any]
         let today = ISO8601DateFormatter().string(from: Date()).prefix(10)
         let buckets = usageResult?["dailyUsageBuckets"] as? [[String: Any]]
@@ -363,6 +363,12 @@ enum OfficialUsageClient {
             resetCredits: (rateResult?["rateLimitResetCredits"] as? [String: Any])?["availableCount"] as? Int,
             tokenUsage: tokenUsage
         )
+    }
+
+    static func rateLimits(from response: [String: Any]?) -> [String: Any]? {
+        // Older app-server versions wrapped the quota windows in `rateLimits`.
+        // Newer versions return `primary` and `secondary` directly in the result.
+        (response?["rateLimits"] as? [String: Any]) ?? response
     }
 
     private static func parseWindow(_ value: Any?) -> OfficialRateLimitWindow? {

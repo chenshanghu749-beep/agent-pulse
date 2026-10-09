@@ -1433,6 +1433,16 @@ if CommandLine.arguments.contains("--status-layout-overlap-test") {
         "Logged in using ChatGPT",
         terminationStatus: 0
     ))
+    let currentRateLimitResponse: [String: Any] = [
+        "primary": ["usedPercent": 44],
+        "secondary": ["usedPercent": 7],
+        "planType": "plus"
+    ]
+    precondition((OfficialUsageClient.rateLimits(from: currentRateLimitResponse)?["primary"] as? [String: Any])?["usedPercent"] as? Int == 44)
+    let legacyRateLimitResponse: [String: Any] = [
+        "rateLimits": ["primary": ["usedPercent": 12]]
+    ]
+    precondition((OfficialUsageClient.rateLimits(from: legacyRateLimitResponse)?["primary"] as? [String: Any])?["usedPercent"] as? Int == 12)
 
     let shortWindow = OfficialRateLimitWindow(
         usedPercent: 1,

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/badge/release-3.3.5-111111">
+  <img alt="Release" src="https://img.shields.io/badge/release-3.3.6-111111">
   <img alt="Stars" src="https://img.shields.io/github/stars/chenshanghu749-beep/agent-pulse">
   <img alt="Swift" src="https://img.shields.io/badge/swift-5-F05138">
   <img alt="AppKit" src="https://img.shields.io/badge/AppKit-native-111111">
@@ -21,6 +21,10 @@ Agent Pulse is a native macOS menu bar routing and status tool for Codex, Cursor
 <p align="center">
   <img src="docs/assets/menu-bar-preview.png" alt="Agent Pulse menu bar preview" width="100%">
 </p>
+
+## What's New in 3.3.6
+
+- Added support for the current Codex App Server usage response, restoring the 5-hour and 7-day official usage display in the menu bar, dashboard, and desktop widget.
 
 ## What's New in 3.3.5
 
@@ -83,7 +87,7 @@ The menu bar icon continuously reflects the current task status. A three-color t
 
 ## Manual Installation
 
-Download [`Agent-Pulse-3.3.5.dmg`](dist/Agent-Pulse-3.3.5.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
+Download [`Agent-Pulse-3.3.6.dmg`](dist/Agent-Pulse-3.3.6.dmg), open it, and drag `Agent Pulse.app` into `Applications`.
 
 If macOS blocks the first launch, right-click the app in Finder and select `Open`.
 
@@ -97,7 +101,7 @@ chmod +x build.sh package.sh
 ./package.sh
 ```
 
-The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.3.5.dmg`.
+The app is generated at `build/Agent Pulse.app`, and the installer is generated at `dist/Agent-Pulse-3.3.6.dmg`.
 
 ## Privacy and Security
 
@@ -123,4 +127,4 @@ If Agent Pulse is useful to you, you can support its ongoing maintenance through
   <img src="docs/assets/wechat-pay.jpg" alt="WeChat payment QR code" width="320">
 </p>
 
-Current version: `3.3.5`
+Current version: `3.3.6`
